@@ -1,0 +1,2687 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>三体问题 — 精灵动画研究</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0a0a0a; color: #f2f0ea; overflow: hidden; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; }
+  #root { position: absolute; inset: 0; }
+  #tweaks-root { position: absolute; inset: 0; pointer-events: none; }
+  #tweaks-root > * { pointer-events: auto; }
+  * { box-sizing: border-box; }
+  input[type=range] { cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="tweaks-root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+// inlined from animations.jsx
+
+// animations.jsx
+// Reusable animation starter: Stage, Timeline, Sprite, easing helpers.
+// Usage (in an HTML file that loads React + Babel):
+//
+//   <Stage width={1280} height={720} duration={10} background="#f6f4ef">
+//     <MyScene />
+//   </Stage>
+//
+// Inside <Stage>, any child can call useTime() to read the current
+// playhead (seconds). Or wrap content in <Sprite start={1} end={4}>...</Sprite>
+// to only render during that window -- children receive a `localTime` and
+// `progress` via the useSprite() hook.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Easing functions (hand-rolled, Popmotion-style) ─────────────────────────
+// All easings take t ∈ [0,1] and return eased t ∈ [0,1] (may overshoot for back/elastic).
+const Easing = {
+  linear: (t) => t,
+
+  // Quad
+  easeInQuad:    (t) => t * t,
+  easeOutQuad:   (t) => t * (2 - t),
+  easeInOutQuad: (t) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t),
+
+  // Cubic
+  easeInCubic:    (t) => t * t * t,
+  easeOutCubic:   (t) => (--t) * t * t + 1,
+  easeInOutCubic: (t) => (t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1),
+
+  // Quart
+  easeInQuart:    (t) => t * t * t * t,
+  easeOutQuart:   (t) => 1 - (--t) * t * t * t,
+  easeInOutQuart: (t) => (t < 0.5 ? 8 * t * t * t * t : 1 - 8 * (--t) * t * t * t),
+
+  // Expo
+  easeInExpo:  (t) => (t === 0 ? 0 : Math.pow(2, 10 * (t - 1))),
+  easeOutExpo: (t) => (t === 1 ? 1 : 1 - Math.pow(2, -10 * t)),
+  easeInOutExpo: (t) => {
+    if (t === 0) return 0;
+    if (t === 1) return 1;
+    if (t < 0.5) return 0.5 * Math.pow(2, 20 * t - 10);
+    return 1 - 0.5 * Math.pow(2, -20 * t + 10);
+  },
+
+  // Sine
+  easeInSine:    (t) => 1 - Math.cos((t * Math.PI) / 2),
+  easeOutSine:   (t) => Math.sin((t * Math.PI) / 2),
+  easeInOutSine: (t) => -(Math.cos(Math.PI * t) - 1) / 2,
+
+  // Back (overshoot)
+  easeOutBack: (t) => {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  },
+  easeInBack: (t) => {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return c3 * t * t * t - c1 * t * t;
+  },
+  easeInOutBack: (t) => {
+    const c1 = 1.70158, c2 = c1 * 1.525;
+    return t < 0.5
+      ? (Math.pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2
+      : (Math.pow(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2;
+  },
+
+  // Elastic
+  easeOutElastic: (t) => {
+    const c4 = (2 * Math.PI) / 3;
+    if (t === 0) return 0;
+    if (t === 1) return 1;
+    return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+  },
+};
+
+// ── Core interpolation helpers ──────────────────────────────────────────────
+
+// Clamp a value to [min, max]
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+// interpolate([0, 0.5, 1], [0, 100, 50], ease?) -> fn(t)
+// Popmotion-style: linearly maps t across input keyframes to output values,
+// with optional easing per segment (single fn or array of fns).
+function interpolate(input, output, ease = Easing.linear) {
+  return (t) => {
+    if (t <= input[0]) return output[0];
+    if (t >= input[input.length - 1]) return output[output.length - 1];
+    for (let i = 0; i < input.length - 1; i++) {
+      if (t >= input[i] && t <= input[i + 1]) {
+        const span = input[i + 1] - input[i];
+        const local = span === 0 ? 0 : (t - input[i]) / span;
+        const easeFn = Array.isArray(ease) ? (ease[i] || Easing.linear) : ease;
+        const eased = easeFn(local);
+        return output[i] + (output[i + 1] - output[i]) * eased;
+      }
+    }
+    return output[output.length - 1];
+  };
+}
+
+// animate({from, to, start, end, ease})(t) — simpler single-segment tween.
+// Returns `from` before `start`, `to` after `end`.
+function animate({ from = 0, to = 1, start = 0, end = 1, ease = Easing.easeInOutCubic }) {
+  return (t) => {
+    if (t <= start) return from;
+    if (t >= end) return to;
+    const local = (t - start) / (end - start);
+    return from + (to - from) * ease(local);
+  };
+}
+
+// ── Timeline context ────────────────────────────────────────────────────────
+
+const TimelineContext = React.createContext({ time: 0, duration: 10, playing: false });
+
+const useTime = () => React.useContext(TimelineContext).time;
+const useTimeline = () => React.useContext(TimelineContext);
+
+// ── Sprite ──────────────────────────────────────────────────────────────────
+// Renders children only when the playhead is inside [start, end]. Provides
+// a sub-context with `localTime` (seconds since start) and `progress` (0..1).
+//
+//   <Sprite start={2} end={5}>
+//     {({ localTime, progress }) => <Thing x={progress * 100} />}
+//   </Sprite>
+//
+// Or as a plain wrapper — children can call useSprite() themselves.
+
+const SpriteContext = React.createContext({ localTime: 0, progress: 0, duration: 0 });
+const useSprite = () => React.useContext(SpriteContext);
+
+function Sprite({ start = 0, end = Infinity, children, keepMounted = false }) {
+  const { time } = useTimeline();
+  const visible = time >= start && time <= end;
+  if (!visible && !keepMounted) return null;
+
+  const duration = end - start;
+  const localTime = Math.max(0, time - start);
+  const progress = duration > 0 && isFinite(duration)
+    ? clamp(localTime / duration, 0, 1)
+    : 0;
+
+  const value = { localTime, progress, duration, visible };
+
+  return (
+    <SpriteContext.Provider value={value}>
+      {typeof children === 'function' ? children(value) : children}
+    </SpriteContext.Provider>
+  );
+}
+
+// ── Sample sprite components ────────────────────────────────────────────────
+
+// TextSprite: fades/slides text in on entry, holds, then fades out on exit.
+// Props: text, x, y, size, color, font, entryDur, exitDur, align
+function TextSprite({
+  text,
+  x = 0, y = 0,
+  size = 48,
+  color = '#111',
+  font = 'Inter, system-ui, sans-serif',
+  weight = 600,
+  entryDur = 0.45,
+  exitDur = 0.35,
+  entryEase = Easing.easeOutBack,
+  exitEase = Easing.easeInCubic,
+  align = 'left',
+  letterSpacing = '-0.01em',
+}) {
+  const { localTime, duration } = useSprite();
+  const exitStart = Math.max(0, duration - exitDur);
+
+  let opacity = 1;
+  let ty = 0;
+
+  if (localTime < entryDur) {
+    const t = entryEase(clamp(localTime / entryDur, 0, 1));
+    opacity = t;
+    ty = (1 - t) * 16;
+  } else if (localTime > exitStart) {
+    const t = exitEase(clamp((localTime - exitStart) / exitDur, 0, 1));
+    opacity = 1 - t;
+    ty = -t * 8;
+  }
+
+  const translateX = align === 'center' ? '-50%' : align === 'right' ? '-100%' : '0';
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: x, top: y,
+      transform: `translate(${translateX}, ${ty}px)`,
+      opacity,
+      fontFamily: font,
+      fontSize: size,
+      fontWeight: weight,
+      color,
+      letterSpacing,
+      whiteSpace: 'pre',
+      lineHeight: 1.1,
+      willChange: 'transform, opacity',
+    }}>
+      {text}
+    </div>
+  );
+}
+
+// ImageSprite: scales + fades in; optional Ken Burns drift during hold.
+function ImageSprite({
+  src,
+  x = 0, y = 0,
+  width = 400, height = 300,
+  entryDur = 0.6,
+  exitDur = 0.4,
+  kenBurns = false,
+  kenBurnsScale = 1.08,
+  radius = 12,
+  fit = 'cover',
+  placeholder = null, // {label: string} for striped placeholder
+}) {
+  const { localTime, duration } = useSprite();
+  const exitStart = Math.max(0, duration - exitDur);
+
+  let opacity = 1;
+  let scale = 1;
+
+  if (localTime < entryDur) {
+    const t = Easing.easeOutCubic(clamp(localTime / entryDur, 0, 1));
+    opacity = t;
+    scale = 0.96 + 0.04 * t;
+  } else if (localTime > exitStart) {
+    const t = Easing.easeInCubic(clamp((localTime - exitStart) / exitDur, 0, 1));
+    opacity = 1 - t;
+    scale = (kenBurns ? kenBurnsScale : 1) + 0.02 * t;
+  } else if (kenBurns) {
+    const holdSpan = exitStart - entryDur;
+    const holdT = holdSpan > 0 ? (localTime - entryDur) / holdSpan : 0;
+    scale = 1 + (kenBurnsScale - 1) * holdT;
+  }
+
+  const content = placeholder ? (
+    <div style={{
+      width: '100%', height: '100%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'repeating-linear-gradient(135deg, #e9e6df 0 10px, #dcd8cf 10px 20px)',
+      color: '#6b6458',
+      fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+      fontSize: 13,
+      letterSpacing: '0.04em',
+      textTransform: 'uppercase',
+    }}>
+      {placeholder.label || 'image'}
+    </div>
+  ) : (
+    <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: fit, display: 'block' }} />
+  );
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: x, top: y,
+      width, height,
+      opacity,
+      transform: `scale(${scale})`,
+      transformOrigin: 'center',
+      borderRadius: radius,
+      overflow: 'hidden',
+      willChange: 'transform, opacity',
+    }}>
+      {content}
+    </div>
+  );
+}
+
+// RectSprite: simple rectangle that animates position/size/color via props.
+// Useful demo primitive — takes a `render` fn for per-frame customization.
+function RectSprite({
+  x = 0, y = 0,
+  width = 100, height = 100,
+  color = '#111',
+  radius = 8,
+  entryDur = 0.4,
+  exitDur = 0.3,
+  render, // optional: (ctx) => style overrides
+}) {
+  const spriteCtx = useSprite();
+  const { localTime, duration } = spriteCtx;
+  const exitStart = Math.max(0, duration - exitDur);
+
+  let opacity = 1;
+  let scale = 1;
+
+  if (localTime < entryDur) {
+    const t = Easing.easeOutBack(clamp(localTime / entryDur, 0, 1));
+    opacity = clamp(localTime / entryDur, 0, 1);
+    scale = 0.4 + 0.6 * t;
+  } else if (localTime > exitStart) {
+    const t = Easing.easeInQuad(clamp((localTime - exitStart) / exitDur, 0, 1));
+    opacity = 1 - t;
+    scale = 1 - 0.15 * t;
+  }
+
+  const overrides = render ? render(spriteCtx) : {};
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: x, top: y,
+      width, height,
+      background: color,
+      borderRadius: radius,
+      opacity,
+      transform: `scale(${scale})`,
+      transformOrigin: 'center',
+      willChange: 'transform, opacity',
+      ...overrides,
+    }} />
+  );
+}
+
+
+function Stage({
+  width = 1280,
+  height = 720,
+  duration = 10,
+  background = '#f6f4ef',
+  fps = 60,
+  loop = true,
+  autoplay = true,
+  persistKey = 'animstage',
+  children,
+}) {
+  const [time, setTime] = React.useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem(persistKey + ':t') || '0');
+      return isFinite(v) ? clamp(v, 0, duration) : 0;
+    } catch { return 0; }
+  });
+  const [playing, setPlaying] = React.useState(autoplay);
+  const [hoverTime, setHoverTime] = React.useState(null);
+  const [scale, setScale] = React.useState(1);
+
+  const stageRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
+  const rafRef = React.useRef(null);
+  const lastTsRef = React.useRef(null);
+
+  // Persist playhead
+  React.useEffect(() => {
+    try { localStorage.setItem(persistKey + ':t', String(time)); } catch {}
+  }, [time, persistKey]);
+
+  // Auto-scale to fit viewport
+  React.useEffect(() => {
+    if (!stageRef.current) return;
+    const el = stageRef.current;
+    const measure = () => {
+      const barH = 44; // playback bar height
+      const s = Math.min(
+        el.clientWidth / width,
+        (el.clientHeight - barH) / height
+      );
+      setScale(Math.max(0.05, s));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [width, height]);
+
+  // Animation loop
+  React.useEffect(() => {
+    if (!playing) {
+      lastTsRef.current = null;
+      return;
+    }
+    const step = (ts) => {
+      if (lastTsRef.current == null) lastTsRef.current = ts;
+      const dt = (ts - lastTsRef.current) / 1000;
+      lastTsRef.current = ts;
+      setTime((t) => {
+        let next = t + dt;
+        if (next >= duration) {
+          if (loop) next = next % duration;
+          else { next = duration; setPlaying(false); }
+        }
+        return next;
+      });
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      lastTsRef.current = null;
+    };
+  }, [playing, duration, loop]);
+
+  // Keyboard: space = play/pause, ← → = seek
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setPlaying(p => !p);
+      } else if (e.code === 'ArrowLeft') {
+        setTime(t => clamp(t - (e.shiftKey ? 1 : 0.1), 0, duration));
+      } else if (e.code === 'ArrowRight') {
+        setTime(t => clamp(t + (e.shiftKey ? 1 : 0.1), 0, duration));
+      } else if (e.key === '0' || e.code === 'Home') {
+        setTime(0);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [duration]);
+
+  const displayTime = hoverTime != null ? hoverTime : time;
+
+  const ctxValue = React.useMemo(
+    () => ({ time: displayTime, duration, playing, setTime, setPlaying }),
+    [displayTime, duration, playing]
+  );
+
+  return (
+    <div
+      ref={stageRef}
+      style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center',
+        background: '#0a0a0a',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      }}
+    >
+      {/* Canvas area — vertically centered in remaining space */}
+      <div style={{
+        flex: 1,
+        width: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        overflow: 'hidden',
+        minHeight: 0,
+      }}>
+        <div
+          ref={canvasRef}
+          style={{
+            width, height,
+            background,
+            position: 'relative',
+            transform: `scale(${scale})`,
+            transformOrigin: 'center',
+            flexShrink: 0,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+            overflow: 'hidden',
+          }}
+        >
+          <TimelineContext.Provider value={ctxValue}>
+            {children}
+          </TimelineContext.Provider>
+        </div>
+      </div>
+
+      {/* Playback bar — stacked below canvas, never overlapping */}
+      <PlaybackBar
+        time={displayTime}
+        actualTime={time}
+        duration={duration}
+        playing={playing}
+        onPlayPause={() => setPlaying(p => !p)}
+        onReset={() => { setTime(0); }}
+        onSeek={(t) => setTime(t)}
+        onHover={(t) => setHoverTime(t)}
+      />
+    </div>
+  );
+}
+
+// ── Playback bar ────────────────────────────────────────────────────────────
+// Play/pause, return-to-begin, scrub track, time display.
+// Uses fixed-width time fields so layout doesn't thrash.
+
+function PlaybackBar({ time, duration, playing, onPlayPause, onReset, onSeek, onHover }) {
+  const trackRef = React.useRef(null);
+  const [dragging, setDragging] = React.useState(false);
+
+  const timeFromEvent = React.useCallback((e) => {
+    const rect = trackRef.current.getBoundingClientRect();
+    const x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    return x * duration;
+  }, [duration]);
+
+  const onTrackMove = (e) => {
+    if (!trackRef.current) return;
+    const t = timeFromEvent(e);
+    if (dragging) {
+      onSeek(t);
+    } else {
+      onHover(t);
+    }
+  };
+
+  const onTrackLeave = () => {
+    if (!dragging) onHover(null);
+  };
+
+  const onTrackDown = (e) => {
+    setDragging(true);
+    const t = timeFromEvent(e);
+    onSeek(t);
+    onHover(null);
+  };
+
+  React.useEffect(() => {
+    if (!dragging) return;
+    const onUp = () => setDragging(false);
+    const onMove = (e) => {
+      if (!trackRef.current) return;
+      const t = timeFromEvent(e);
+      onSeek(t);
+    };
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mousemove', onMove);
+    return () => {
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mousemove', onMove);
+    };
+  }, [dragging, timeFromEvent, onSeek]);
+
+  const pct = duration > 0 ? (time / duration) * 100 : 0;
+  const fmt = (t) => {
+    const total = Math.max(0, t);
+    const m = Math.floor(total / 60);
+    const s = Math.floor(total % 60);
+    const cs = Math.floor((total * 100) % 100);
+    return `${String(m).padStart(1, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+  };
+
+  const mono = 'JetBrains Mono, ui-monospace, SFMono-Regular, monospace';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '8px 16px',
+      background: 'rgba(20,20,20,0.92)',
+      borderTop: '1px solid rgba(255,255,255,0.08)',
+      width: '100%',
+      maxWidth: 680,
+      alignSelf: 'center',
+
+      borderRadius: 8,
+      color: '#f6f4ef',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      userSelect: 'none',
+      flexShrink: 0,
+    }}>
+      <IconButton onClick={onReset} title="Return to start (0)">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M3 2v10M12 2L5 7l7 5V2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+        </svg>
+      </IconButton>
+      <IconButton onClick={onPlayPause} title="Play/pause (space)">
+        {playing ? (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <rect x="3" y="2" width="3" height="10" fill="currentColor"/>
+            <rect x="8" y="2" width="3" height="10" fill="currentColor"/>
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 2l9 5-9 5V2z" fill="currentColor"/>
+          </svg>
+        )}
+      </IconButton>
+
+      {/* Current time: fixed width so it doesn't thrash */}
+      <div style={{
+        fontFamily: mono,
+        fontSize: 12,
+        fontVariantNumeric: 'tabular-nums',
+        width: 64, textAlign: 'right',
+        color: '#f6f4ef',
+      }}>
+        {fmt(time)}
+      </div>
+
+      {/* Scrub track */}
+      <div
+        ref={trackRef}
+        onMouseMove={onTrackMove}
+        onMouseLeave={onTrackLeave}
+        onMouseDown={onTrackDown}
+        style={{
+          flex: 1,
+          height: 22,
+          position: 'relative',
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center',
+        }}
+      >
+        <div style={{
+          position: 'absolute',
+          left: 0, right: 0, height: 4,
+          background: 'rgba(255,255,255,0.12)',
+          borderRadius: 2,
+        }}/>
+        <div style={{
+          position: 'absolute',
+          left: 0, width: `${pct}%`, height: 4,
+          background: 'oklch(72% 0.12 250)',
+          borderRadius: 2,
+        }}/>
+        <div style={{
+          position: 'absolute',
+          left: `${pct}%`, top: '50%',
+          width: 12, height: 12,
+          marginLeft: -6, marginTop: -6,
+          background: '#fff',
+          borderRadius: 6,
+          boxShadow: '0 2px 4px rgba(0,0,0,0.4)',
+        }}/>
+      </div>
+
+      {/* Duration: fixed width */}
+      <div style={{
+        fontFamily: mono,
+        fontSize: 12,
+        fontVariantNumeric: 'tabular-nums',
+        width: 64, textAlign: 'left',
+        color: 'rgba(246,244,239,0.55)',
+      }}>
+        {fmt(duration)}
+      </div>
+    </div>
+  );
+}
+
+function IconButton({ children, onClick, title }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 28, height: 28,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: hover ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 6,
+        color: '#f6f4ef',
+        cursor: 'pointer',
+        padding: 0,
+        transition: 'background 120ms',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+
+Object.assign(window, {
+  Easing, interpolate, animate, clamp,
+  TimelineContext, useTime, useTimeline,
+  Sprite, SpriteContext, useSprite,
+  TextSprite, ImageSprite, RectSprite,
+  Stage, PlaybackBar,
+});
+
+
+</script>
+
+<script type="text/babel">
+// inlined from simulation.jsx
+// simulation.jsx
+// Three-body physics simulation — scenario-based.
+//
+// Public API:
+//   SCENARIOS               — ordered list of scenario definitions (id, name, ...)
+//   rebuildScenarios()      — pre-compute all scenario simulations
+//   sampleScenario(id, t)   — snapshot at sim time t
+//   getTrail(id, t, i)      — trail up to t for body i
+//   getCollisions(id)       — collision events array
+//   luminosity(m), radiusFor(b), starRadius(m)
+//   SIM_DT, SIM_STEPS
+
+const G = 1.0;
+const DT = 0.005;
+
+// Stellar radius scales roughly with mass^0.7 on main sequence; we collapse
+// into sim units so a 1.0-M star looks ~0.09 sim units across.
+function starRadius(m) {
+  return 0.06 + 0.05 * Math.min(1.6, Math.pow(Math.max(0.1, m), 0.7));
+}
+function luminosity(m) {
+  return Math.pow(Math.max(0.05, m), 3.5);
+}
+function radiusFor(b) {
+  if (b.m < 0.01) return 0.02;          // planet
+  return starRadius(b.m);
+}
+
+// Core integrator ---------------------------------------------------------
+function simulate(bodies, dt, steps, opts = {}) {
+  const softening = opts.softening ?? 0.8;
+  const shatterCfg = opts.shatter || null;
+  const noStarCollisions = !!opts.noStarCollisions;
+  // Accept bodies as-is; extra "fragment" entries (inert) may already be in
+  // the list from the scenario definition — they stay alive:false until the
+  // shatter hook activates them.
+  const state = bodies.map(b => ({ ...b, alive: b.alive !== false }));
+  const snapshots = new Array(steps);
+  const collisions = [];
+  let shattered = false;
+
+  const accel = (st) => {
+    const a = st.map(() => ({ ax: 0, ay: 0 }));
+    for (let i = 0; i < st.length; i++) {
+      if (!st[i].alive) continue;
+      for (let j = 0; j < st.length; j++) {
+        if (i === j || !st[j].alive) continue;
+        const dx = st[j].x - st[i].x;
+        const dy = st[j].y - st[i].y;
+        const r2 = dx * dx + dy * dy + softening * softening;
+        const r = Math.sqrt(r2);
+        const f = (G * st[j].m) / (r2 * r);
+        a[i].ax += f * dx;
+        a[i].ay += f * dy;
+      }
+    }
+    return a;
+  };
+
+  let a = accel(state);
+  for (let s = 0; s < steps; s++) {
+    for (let i = 0; i < state.length; i++) {
+      if (!state[i].alive) continue;
+      state[i].vx += 0.5 * a[i].ax * dt;
+      state[i].vy += 0.5 * a[i].ay * dt;
+      state[i].x += state[i].vx * dt;
+      state[i].y += state[i].vy * dt;
+    }
+    const aNew = accel(state);
+    for (let i = 0; i < state.length; i++) {
+      if (!state[i].alive) continue;
+      state[i].vx += 0.5 * aNew[i].ax * dt;
+      state[i].vy += 0.5 * aNew[i].ay * dt;
+    }
+    a = aNew;
+
+    // ── Shatter trigger: compute tide on the planet and, once a threshold
+    //    is crossed, redistribute the planet's mass into its fragment slots
+    //    with a spread along the tidal axis + small tangential kicks.
+    if (shatterCfg && !shattered) {
+      const pi = shatterCfg.planetIdx;
+      const planet = state[pi];
+      if (planet && planet.alive) {
+        // Principal tide direction: sum of G·M·r/|r|^5 contributions.
+        let tideAcc = 0;
+        let tx = 0, ty = 0;
+        for (let j = 0; j < state.length; j++) {
+          if (j === pi) continue;
+          if (!state[j].alive) continue;
+          if (state[j].m < 0.01) continue; // stars only
+          const dx = state[j].x - planet.x;
+          const dy = state[j].y - planet.y;
+          const d  = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+          const k  = (2 * state[j].m) / (d * d * d);
+          tideAcc += k;
+          // direction bias — nearest heavy star
+          const w = state[j].m / (d * d * d);
+          tx += (dx / d) * w;
+          ty += (dy / d) * w;
+        }
+        if (tideAcc > shatterCfg.triggerTide) {
+          // Normalize tide axis.
+          const tl = Math.hypot(tx, ty) + 1e-9;
+          const ux = tx / tl, uy = ty / tl;
+          // Perpendicular.
+          const vx = -uy, vy = ux;
+          const frags = shatterCfg.fragmentIdxs;
+          const N = frags.length;
+          // Planet's mass is redistributed across fragments (uniform).
+          const fragM = planet.m / N;
+          // Outward spread speed along tidal axis, with small random tangent.
+          const BASE_SPREAD = shatterCfg.spreadSpeed ?? 0.9;
+          const TAN_KICK    = shatterCfg.tangentialKick ?? 0.25;
+          const RADIAL_JITTER = 0.25;
+          // Deterministic PRNG so frames are reproducible.
+          let seed = (shatterCfg.seed ?? 2025) >>> 0;
+          const rnd = () => {
+            seed = (seed + 0x6D2B79F5) >>> 0;
+            let t = seed;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+          };
+          for (let k = 0; k < N; k++) {
+            const idx = frags[k];
+            const f = state[idx];
+            // Fraction along tide axis: evenly spread −1..+1 with jitter.
+            const along = ((k + 0.5) / N) * 2 - 1; // −1..+1
+            const aJ = along * (1 + (rnd() - 0.5) * RADIAL_JITTER);
+            // Small perpendicular offset so trajectories fan out visually.
+            const perp = (rnd() - 0.5) * 0.35;
+            // Initial position: very close to planet (spawn cluster).
+            const rSpawn = 0.02;
+            f.x = planet.x + ux * aJ * rSpawn + vx * perp * rSpawn;
+            f.y = planet.y + uy * aJ * rSpawn + vy * perp * rSpawn;
+            // Velocity = planet velocity + outward kick + tangential kick.
+            const outSpeed = BASE_SPREAD * aJ;
+            const tanSpeed = (rnd() - 0.5) * 2 * TAN_KICK;
+            f.vx = planet.vx + ux * outSpeed + vx * tanSpeed;
+            f.vy = planet.vy + uy * outSpeed + vy * tanSpeed;
+            f.alive = true;
+            // Keep mass tiny so fragments don't perturb the stars.
+            f.m = fragM;
+          }
+          planet.alive = false;
+          collisions.push({
+            step: s, t: s * dt, shatter: true,
+            x: planet.x, y: planet.y,
+            vrel: 0, mA: planet.m, mB: 0,
+            i: pi, j: pi, survivor: -1, victim: pi,
+          });
+          shattered = true;
+          // Re-seed accelerations for next step.
+          a = accel(state);
+        }
+      }
+    }
+
+    // Collision detection (star-star only).
+    if (!noStarCollisions) {
+    for (let i = 0; i < state.length; i++) {
+      if (!state[i].alive) continue;
+      if (state[i].m < 0.01) continue; // skip planet / fragments
+      for (let j = i + 1; j < state.length; j++) {
+        if (!state[j].alive) continue;
+        if (state[j].m < 0.01) continue;
+        const dx = state[j].x - state[i].x;
+        const dy = state[j].y - state[i].y;
+        const d  = Math.sqrt(dx * dx + dy * dy);
+        const rSum = radiusFor(state[i]) + radiusFor(state[j]);
+        if (d < rSum) {
+          const A = state[i], B = state[j];
+          const vrel = Math.sqrt((A.vx - B.vx) ** 2 + (A.vy - B.vy) ** 2);
+          const survivor = A.m >= B.m ? i : j;
+          const victim   = survivor === i ? j : i;
+          const mA = A.m, mB = B.m, mT = mA + mB;
+          collisions.push({
+            step: s, t: s * dt,
+            i, j,
+            x: (A.x + B.x) / 2, y: (A.y + B.y) / 2,
+            vrel, mA, mB, survivor, victim,
+          });
+          state[survivor].x = (mA * A.x + mB * B.x) / mT;
+          state[survivor].y = (mA * A.y + mB * B.y) / mT;
+          state[survivor].vx = (mA * A.vx + mB * B.vx) / mT;
+          state[survivor].vy = (mA * A.vy + mB * B.vy) / mT;
+          state[survivor].m = mT;
+          state[victim].alive = false;
+          state[victim].x = state[survivor].x;
+          state[victim].y = state[survivor].y;
+        }
+      }
+    }
+    } // end if (!noStarCollisions)
+
+    snapshots[s] = state.map(b => ({ x: b.x, y: b.y, alive: b.alive, m: b.m, vx: b.vx, vy: b.vy }));
+  }
+  return { snapshots, collisions };
+}
+
+// Scenarios ---------------------------------------------------------------
+// Each scenario defines:
+//   id       — stable string ID
+//   name     — Chinese display name
+//   kicker   — short Chinese subtitle ("第 N 种天象")
+//   tagline  — single sentence summary for the scene corner
+//   metric   — which live metric the HUD should show:
+//              'temperature' | 'flux' | 'tide' | 'angularSpeed' | 'torn'
+//   duration — seconds of real-time playback
+//   simSpeed — sim seconds per real second (default 1.2)
+//   bodies   — 4 bodies: 3 stars + 1 planet (planet last)
+//
+// Coordinate system: sim units ≈ AU, scaled 180 px/unit on screen.
+// Planet mass 3e-6 is fixed; stars are ~0.7–1.4 M_sun.
+//
+// Each scenario is hand-tuned to land its signature phenomenon within the
+// duration. Parameters were chosen by trial; small changes may flip behavior.
+
+const PLANET_M = 3e-6;
+
+function planet(x, y, vx, vy) {
+  return { m: PLANET_M, x, y, vx, vy };
+}
+function star(m, x, y, vx, vy) {
+  return { m, x, y, vx, vy };
+}
+// Inert fragment slot. Not simulated until a scenario's shatter hook
+// activates it by setting alive:true and injecting position/velocity.
+function fragment() {
+  return { m: PLANET_M / 8, x: 0, y: 0, vx: 0, vy: 0, alive: false, isFragment: true };
+}
+
+const SCENARIOS = [
+  // 1. 恒纪元 — one nearby star dominates; the other two stay far away.
+  {
+    id: 'stable_era',
+    name: '恒纪元',
+    kicker: '第一大天象',
+    tagline: '三体星暂时围绕一颗恒星稳定运行。',
+    metric: 'temperature',
+    duration: 8,
+    simSpeed: 1.0,
+    noStarCollisions: true,
+    bodies: [
+      star(1.1,  0.0,  0.0,   0.0,  0.0),
+      star(0.95, -8.5, 4.8,   0.03, -0.01),
+      star(0.9,  8.2, -5.1,  -0.03,  0.01),
+      planet(0.9, 0.0, 0.0, 0.75),
+    ],
+  },
+
+  // 2. 飞星 — one star becomes a distant bright point.
+  //    α orbits β close-in; γ is far away and drifting.
+  //    Planet orbits α-β pair. γ's contribution is tiny.
+  {
+    id: 'fly_star',
+    name: '飞星',
+    kicker: '第二大天象',
+    tagline: '一颗恒星远到不再是太阳。',
+    metric: 'flux_ratio_distant',
+    duration: 12,
+    simSpeed: 1.0,
+    noStarCollisions: true,
+    bodies: [
+      star(1.1, -0.35, 0.0,  0.0,  0.55),   // α
+      star(1.0,  0.35, 0.0,  0.0, -0.55),   // β  (tight binary with α)
+      star(0.9,  3.2,  1.8,  -0.18, 0.02),  // γ  — far away, slow
+      planet(0.0,  1.4,  0.85, 0.0),        // planet orbits the binary
+    ],
+  },
+
+  // 3. 三颗飞星 — all three stars fly outward, planet freezes.
+  //    Stars placed on vertices of a triangle with radially outward velocities.
+  //    Planet sits near barycenter with low velocity.
+  {
+    id: 'three_fly',
+    name: '三颗飞星',
+    kicker: '第三大天象',
+    tagline: '三颗恒星一起远去，世界陷入极寒。',
+    metric: 'flux',
+    duration: 6,
+    simSpeed: 1.0,
+    noStarCollisions: true,
+    bodies: [
+      star(1.0,  0.00,  0.80,  0.00,  0.90),   // top, flies outward first
+      star(1.0, -0.70, -0.40, -0.75, -0.60),   // lower-left, wide arc then return
+      star(1.0,  0.70, -0.40,  0.75, -0.60),   // lower-right, wide arc then return
+      planet(0.0, 0.0, 0.0, 0.0),
+    ],
+  },
+
+  // 4. 飞星不动 — a distant star on a near-radial approach.
+  //    Its angular velocity against the sky appears near zero because its
+  //    motion is mostly along the line of sight; but it's closing fast.
+  //    α-β are a tight binary holding the planet; γ drops straight in.
+  {
+    id: 'static_fly',
+    name: '飞星不动',
+    kicker: '第四大天象',
+    tagline: '天上一颗星忽然停住了——它其实在直直掉下来。',
+    metric: 'approach',
+    duration: 4.2,
+    simSpeed: 1.0,
+    noStarCollisions: true,
+    bodies: [
+      star(1.1, -2.40,  0.60,  0.00,  0.06),   // α stays far in the background
+      star(1.0,  2.40, -0.60,  0.00, -0.06),   // β stays far in the background
+      star(0.9,  0.20,  3.10,  0.06, -0.90),   // γ dives nearly straight in, then skims past
+      planet(0.04, 0.22, 0.0, 0.0),
+    ],
+  },
+
+  // 5. 双日凌空 — two stars close to planet, brutal insolation.
+  //    α and β on either side of the planet, γ far off-stage.
+  {
+    id: 'twin_suns',
+    name: '双日凌空',
+    kicker: '第五大天象',
+    tagline: '两颗恒星同时占据天空。',
+    metric: 'flux',
+    duration: 10,
+    simSpeed: 0.8,
+    noStarCollisions: true,
+    bodies: [
+      star(1.1, -0.55,  0.05,  0.0,  0.35),
+      star(1.0,  0.55, -0.05,  0.0, -0.35),
+      star(0.9, -5.2,  3.4,   0.10, -0.02),   // γ stays far from the center
+      planet(0.0, 0.0, 0.15, 0.0),
+    ],
+  },
+
+  // 6. 三日凌空 — all three close, searing.
+  //    Stars form a rough triangle around the planet with low velocities,
+  //    so they stay bunched for ~10 s before dispersing.
+  {
+    id: 'tri_suns',
+    name: '三日凌空',
+    kicker: '第六大天象',
+    tagline: '三颗恒星同时炙烤三体星。',
+    metric: 'flux',
+    duration: 10,
+    simSpeed: 0.8,
+    noStarCollisions: true,
+    bodies: [
+      star(1.0,  0.00,  0.70,  -0.35,  0.00),
+      star(1.0, -0.60, -0.35,   0.18,  0.30),
+      star(1.0,  0.60, -0.35,   0.17, -0.30),
+      planet(0.0, 0.0, 0.08, 0.0),
+    ],
+  },
+
+  // 7. 三日连珠 — three stars + planet near-collinear.
+  //    Setup: all four bodies placed near y=0, arranged left→right along the
+  //    x-axis. Stars have tiny perpendicular (y) velocities so they drift
+  //    through a near-perfect alignment around the middle of the scene.
+  //    Planet sits between the α-β pair with a small vy so it crosses the
+  //    axis at the same moment. Tide peaks at alignment.
+  {
+    id: 'syzygy',
+    name: '三日连珠',
+    kicker: '第七大天象',
+    tagline: '三颗恒星与三体星排成一条线。',
+    metric: 'tide',
+    duration: 12,
+    simSpeed: 0.9,
+    noStarCollisions: true,
+    bodies: [
+      // α at far left, drifting slowly right + tiny up.
+      star(1.0, -2.2,  0.04,   0.05, -0.004),
+      // β at mid-right, slow drift left + tiny down.
+      star(1.0,  0.9, -0.03,  -0.06,  0.003),
+      // γ at far right, drifting left.
+      star(1.0,  2.4,  0.02,  -0.07, -0.002),
+      // Planet between α and β, nearly on axis with small vy so it crosses
+      // y=0 around t=3–5 (when stars also line up).
+      planet(-0.6, -0.05, 0.00, 0.015),
+    ],
+  },
+
+  // 8. 大撕裂 — a star makes an extreme close pass; tidal force shreds
+  //    the planet. The planet shatters into N fragments which then evolve
+  //    under the three stars' gravity (each fragment is a near-massless
+  //    test particle). Fragments may end up orbiting different stars.
+  {
+    id: 'great_tear',
+    name: '大撕裂',
+    kicker: '第八大天象',
+    tagline: '潮汐力撕碎了三体星。',
+    metric: 'torn',
+    duration: 14,
+    simSpeed: 0.9,
+    noStarCollisions: true,
+    shatter: {
+      planetIdx: 3,
+      // 8 fragments — slots 4..11 in the bodies array.
+      fragmentIdxs: [4, 5, 6, 7, 8, 9, 10, 11],
+      triggerTide: 14,   // sim tide units at which shatter triggers
+      spreadSpeed: 1.1,  // outward velocity scale along tidal axis
+      tangentialKick: 0.45,
+      seed: 314,
+    },
+    bodies: [
+      // α and β form a loose pair, orbiting the center of mass.
+      star(1.0, -1.5,  0.0,   0.08, -0.22),
+      star(1.0,  1.5,  0.0,  -0.08,  0.22),
+      // γ is on a hyperbolic flyby — swings in from above, grazes the planet,
+      //   exits below. Lower incoming speed keeps it from colliding with α/β.
+      star(1.1,  0.0,  2.4,   0.00, -0.80),
+      // Planet in a tight orbit around α-β barycenter; γ's flyby pulls it apart.
+      planet(0.0, 0.0, 0.30, 0.0),
+      // Fragment slots (inert until shatter activates them).
+      fragment(), fragment(), fragment(), fragment(),
+      fragment(), fragment(), fragment(), fragment(),
+    ],
+  },
+];
+
+// Precomputed sims, indexed by scenario id.
+const SIM_CACHE = {};
+
+function rebuildScenarios() {
+  for (const sc of SCENARIOS) {
+    const simSpeed = sc.simSpeed || 1.2;
+    const simT = sc.duration * simSpeed + 0.5; // small buffer
+    const steps = Math.ceil(simT / DT);
+    const { snapshots, collisions } = simulate(
+      sc.bodies.map(b => ({ ...b })),
+      DT, steps,
+      {
+        shatter: sc.shatter || null,
+        noStarCollisions: !!sc.noStarCollisions,
+      },
+    );
+    SIM_CACHE[sc.id] = { snapshots, collisions, steps, dt: DT, simSpeed };
+  }
+  window.SIM_CACHE = SIM_CACHE;
+}
+
+function _getCache(id) {
+  return SIM_CACHE[id];
+}
+
+function sampleScenario(id, simTime) {
+  const c = _getCache(id);
+  if (!c) return [
+    { x:0, y:0, alive:true, m:1 },
+    { x:0, y:0, alive:true, m:1 },
+    { x:0, y:0, alive:true, m:1 },
+    { x:0, y:0, alive:true, m:PLANET_M },
+  ];
+  const idx = Math.max(0, Math.min(c.steps - 1, Math.floor(simTime / c.dt)));
+  return c.snapshots[idx];
+}
+
+function getTrail(id, simTime, bodyIdx, trailLen = 500) {
+  const c = _getCache(id);
+  if (!c) return [];
+  const idx = Math.max(0, Math.min(c.steps - 1, Math.floor(simTime / c.dt)));
+  const start = Math.max(0, idx - trailLen);
+  const out = [];
+  for (let i = start; i <= idx; i++) {
+    const snap = c.snapshots[i][bodyIdx];
+    if (!snap.alive) break;
+    out.push(snap);
+  }
+  return out;
+}
+
+function getCollisions(id) {
+  const c = _getCache(id);
+  return c ? c.collisions : [];
+}
+
+Object.assign(window, {
+  SCENARIOS,
+  rebuildScenarios,
+  sampleScenario, getTrail, getCollisions,
+  luminosity, radiusFor, starRadius,
+  SIM_DT: DT, PLANET_M,
+});
+
+</script>
+
+<script type="text/babel">
+// inlined from tweaks.jsx
+// tweaks.jsx — Scenario picker (replaces the old IC slider panel).
+// Lets the user jump to any scenario or replay the current one.
+// Title: "Tweaks" to match the toolbar toggle contract.
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "_placeholder": true
+}/*EDITMODE-END*/;
+
+const TWEAK_PANEL_FONT = '"Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", Arial, sans-serif';
+
+function TweaksPanel() {
+  const [visible, setVisible] = React.useState(false);
+  const [tick, setTick] = React.useState(0);
+
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      const d = e.data || {};
+      if (d.type === '__activate_edit_mode') setVisible(true);
+      else if (d.type === '__deactivate_edit_mode') setVisible(false);
+    };
+    window.addEventListener('message', onMsg);
+    try {
+      window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    } catch {}
+
+    // Re-render the active-scenario highlight once per second so it tracks
+    // the current playhead.
+    const iv = setInterval(() => setTick((x) => x + 1), 400);
+    return () => { window.removeEventListener('message', onMsg); clearInterval(iv); };
+  }, []);
+
+  if (!visible) return null;
+
+  // Figure out which scenario is currently playing by reading the Stage's
+  // persisted time via localStorage (same key Stage uses: "anim:<persistKey>").
+  // This avoids coupling to Stage internals — we just read the number.
+  const readNow = () => {
+    try {
+      const raw = localStorage.getItem('anim:threebody');
+      if (raw) return parseFloat(raw) || 0;
+    } catch {}
+    return 0;
+  };
+  const now = readNow();
+
+  // Rebuild the schedule here (mirrors scene.jsx) so we can jump to a scenario.
+  const INTRO = window.SCENARIO_INTRO_DUR || 6.0;
+  const INTER = window.SCENARIO_INTER_DUR || 1.2;
+  let cursor = INTRO;
+  const sched = SCENARIOS.map((sc) => {
+    const start = cursor;
+    cursor += sc.duration + INTER;
+    return { id: sc.id, name: sc.name, kicker: sc.kicker, start, end: start + sc.duration, metric: sc.metric };
+  });
+  const outroStart = cursor;
+
+  // Find active index.
+  let activeIdx = -1;
+  if (now < INTRO) activeIdx = -2; // intro
+  else if (now >= outroStart) activeIdx = -3; // outro
+  else {
+    for (let i = 0; i < sched.length; i++) {
+      if (now >= sched[i].start && now < sched[i].start + (sched[i].end - sched[i].start) + INTER) {
+        activeIdx = i;
+        break;
+      }
+    }
+  }
+
+  const jumpTo = (t) => {
+    try {
+      localStorage.setItem('anim:threebody', String(t));
+      // Force Stage to pick up the new time — we dispatch a storage event on ourselves.
+      window.dispatchEvent(new StorageEvent('storage', { key: 'anim:threebody', newValue: String(t) }));
+    } catch {}
+  };
+
+  const metricLabels = {
+    flux_ratio_distant: '辐照占比',
+    temperature_cold: '冻结温度',
+    approach: '视运动 / 闭合',
+    flux_hot: '辐射通量',
+    flux_melt: '辐射通量',
+    tide: '潮汐强度',
+    torn: '洛希极限',
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      right: 20, top: 20, bottom: 20,
+      width: 320,
+      background: 'rgba(14,14,14,0.95)',
+      border: '1px solid rgba(242,240,234,0.15)',
+      color: '#f2f0ea',
+      fontFamily: TWEAK_PANEL_FONT,
+      padding: '18px 18px 14px 18px',
+      overflowY: 'auto',
+      zIndex: 1000,
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 14,
+      }}>
+        <div style={{ fontSize: 13, letterSpacing: '0.24em' }}>调整</div>
+        <div style={{ fontSize: 10, color: 'rgba(242,240,234,0.5)', letterSpacing: '0.14em' }}>
+          TWEAKS
+        </div>
+      </div>
+
+      <div style={{
+        fontSize: 10.5, color: 'rgba(242,240,234,0.6)',
+        lineHeight: 1.7, marginBottom: 18,
+        letterSpacing: '0.02em',
+      }}>
+        跳转到任意一种天象，或从头回放。
+        每个场景都用手工调好的初始条件演示一类典型事件。
+      </div>
+
+      {/* Intro */}
+      <PickerRow
+        label="开场"
+        sub="三体世界观与七种天象"
+        active={activeIdx === -2}
+        onClick={() => jumpTo(0)}
+      />
+
+      {/* Scenarios */}
+      <div style={{
+        marginTop: 18, paddingTop: 14,
+        borderTop: '1px solid rgba(242,240,234,0.12)',
+        fontSize: 9.5, letterSpacing: '0.22em', color: 'rgba(242,240,234,0.5)',
+        marginBottom: 10,
+      }}>
+        七种天象
+      </div>
+
+      {sched.map((s, i) => (
+        <PickerRow
+          key={s.id}
+          index={String(i + 1).padStart(2, '0')}
+          label={s.name}
+          sub={s.kicker + ' · ' + (metricLabels[s.metric] || s.metric)}
+          active={activeIdx === i}
+          onClick={() => jumpTo(s.start + 0.05)}
+        />
+      ))}
+
+      {/* Outro */}
+      <div style={{
+        marginTop: 18, paddingTop: 14,
+        borderTop: '1px solid rgba(242,240,234,0.12)',
+      }}>
+        <PickerRow
+          label="结语"
+          sub="与混沌共处"
+          active={activeIdx === -3}
+          onClick={() => jumpTo(outroStart + 0.05)}
+        />
+      </div>
+
+      <div style={{
+        marginTop: 20, paddingTop: 14,
+        borderTop: '1px solid rgba(242,240,234,0.12)',
+        display: 'flex', gap: 8,
+      }}>
+        <button
+          onClick={() => jumpTo(0)}
+          style={pickerButtonStyle}
+        >从头播放</button>
+        <button
+          onClick={() => {
+            if (activeIdx >= 0) jumpTo(sched[activeIdx].start + 0.05);
+          }}
+          style={pickerButtonStyle}
+        >重播当前</button>
+      </div>
+
+      <div style={{
+        marginTop: 14,
+        fontSize: 10, color: 'rgba(242,240,234,0.4)',
+        lineHeight: 1.7, letterSpacing: '0.04em',
+      }}>
+        所有初始条件为脚本预设。每段时长由物理触发条件决定——改动参数会破坏该天象的精确再现。
+      </div>
+    </div>
+  );
+}
+
+const pickerButtonStyle = {
+  flex: 1,
+  background: 'transparent',
+  border: '1px solid rgba(242,240,234,0.2)',
+  color: 'rgba(242,240,234,0.85)',
+  fontSize: 11,
+  letterSpacing: '0.16em',
+  padding: '8px 10px',
+  cursor: 'pointer',
+  fontFamily: TWEAK_PANEL_FONT,
+};
+
+function PickerRow({ index, label, sub, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'baseline', gap: 14,
+        width: '100%',
+        padding: '10px 2px',
+        background: 'transparent',
+        border: 'none',
+        borderLeft: active
+          ? '2px solid #f2f0ea'
+          : '2px solid transparent',
+        paddingLeft: 10,
+        textAlign: 'left',
+        cursor: 'pointer',
+        color: active ? '#f2f0ea' : 'rgba(242,240,234,0.75)',
+        fontFamily: TWEAK_PANEL_FONT,
+        transition: 'color 120ms',
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.color = '#f2f0ea';
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.color = 'rgba(242,240,234,0.75)';
+      }}
+    >
+      {index && (
+        <span style={{
+          fontSize: 10, color: active ? '#f2f0ea' : 'rgba(242,240,234,0.4)',
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '0.1em',
+          minWidth: 18,
+        }}>{index}</span>
+      )}
+      <span style={{ flex: 1 }}>
+        <div style={{
+          fontSize: 14,
+          letterSpacing: '0.1em',
+          marginBottom: 3,
+        }}>{label}</div>
+        <div style={{
+          fontSize: 10,
+          color: active ? 'rgba(242,240,234,0.7)' : 'rgba(242,240,234,0.45)',
+          letterSpacing: '0.08em',
+        }}>{sub}</div>
+      </span>
+    </button>
+  );
+}
+
+Object.assign(window, {
+  TweaksPanel, TWEAK_DEFAULTS,
+});
+
+</script>
+
+<script type="text/babel">
+// inlined from scene.jsx
+// scene.jsx — 三体 · 七种天象
+// Seven special scenarios from the Trisolarian worldview, played back-to-back.
+// Uses: Stage, Sprite, useTime, interpolate, Easing from animations.jsx
+// Uses: SCENARIOS, sampleScenario, getTrail, getCollisions from simulation.jsx
+
+const W = 1280;
+const H = 800;
+const CX = W / 2;
+const CY = H / 2 + 20;
+const WORLD_SCALE = 180;
+
+const FG = '#f2f0ea';
+const FG_DIM = 'rgba(242,240,234,0.55)';
+const FG_FAINT = 'rgba(242,240,234,0.25)';
+const BG = '#0a0a0a';
+const PLANET_HIGHLIGHT = '#35e6ff';
+const HELVETICA = '"Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", Arial, sans-serif';
+
+const BODY_NAMES = ['α', 'β', 'γ', '三体星'];
+const PLANET_IDX = 3;
+const TOTAL_SCENARIOS = SCENARIOS.length;
+const SCENARIO_SERIES_TITLE = TOTAL_SCENARIOS === 8 ? '三体世界　·　八大天象' : `三体世界　·　${TOTAL_SCENARIOS}大天象`;
+const INTRO_TITLE = TOTAL_SCENARIOS === 8 ? '三体世界八大天象' : `三体世界${TOTAL_SCENARIOS}大天象`;
+
+const sx = (x) => CX + x * WORLD_SCALE;
+const sy = (y) => CY - y * WORLD_SCALE;
+
+// ── Timing ─────────────────────────────────────────────────────────────────
+const INTRO_DUR = 6.0;
+const OUTRO_DUR = 6.5;
+const INTER_DUR = 1.2; // beat between scenarios
+// scenario durations come from simulation.jsx
+
+// ── Temperature model ──────────────────────────────────────────────────────
+// Star surface T ≈ 5800 · m^0.55 (K). Planet equilibrium T from Σ L/d².
+// Calibrated so a solar twin at 1 AU gives 280 K ≈ 7 °C.
+function starSurfaceTempK(m) {
+  return 5800 * Math.pow(Math.max(0.05, m), 0.55);
+}
+const PLANET_TEMP_K = 280;
+function equilibriumTempK(selfIdx, snap) {
+  let flux = 0;
+  for (let j = 0; j < snap.length; j++) {
+    if (j === selfIdx) continue;
+    if (!snap[j].alive) continue;
+    if (snap[j].m < 0.01) continue; // only stars radiate
+    const dx = snap[j].x - snap[selfIdx].x;
+    const dy = snap[j].y - snap[selfIdx].y;
+    const d2 = dx * dx + dy * dy + 0.02;
+    flux += luminosity(snap[j].m) / d2;
+  }
+  if (flux <= 0) return 3;
+  return PLANET_TEMP_K * Math.pow(flux, 0.25);
+}
+// Sum of L/d² — the planet's incoming flux, unitless.
+function incomingFlux(selfIdx, snap) {
+  let flux = 0;
+  for (let j = 0; j < snap.length; j++) {
+    if (j === selfIdx) continue;
+    if (!snap[j].alive) continue;
+    if (snap[j].m < 0.01) continue;
+    const dx = snap[j].x - snap[selfIdx].x;
+    const dy = snap[j].y - snap[selfIdx].y;
+    const d2 = dx * dx + dy * dy + 0.02;
+    flux += luminosity(snap[j].m) / d2;
+  }
+  return flux;
+}
+// Net tidal force magnitude on the planet from all stars: Σ 2GM/r³
+function tidalAccel(selfIdx, snap) {
+  let t = 0;
+  for (let j = 0; j < snap.length; j++) {
+    if (j === selfIdx) continue;
+    if (!snap[j].alive) continue;
+    if (snap[j].m < 0.01) continue;
+    const dx = snap[j].x - snap[selfIdx].x;
+    const dy = snap[j].y - snap[selfIdx].y;
+    const d = Math.sqrt(dx * dx + dy * dy + 0.01);
+    t += (2 * snap[j].m) / (d * d * d);
+  }
+  return t;
+}
+
+function tempToColor(T_K) {
+  const t = Math.max(0, Math.min(1, (Math.log10(Math.max(T_K, 10)) - 1.4) / 2.3));
+  const L = 0.93;
+  const C = 0.045 * (0.6 + Math.abs(t - 0.5) * 0.8);
+  const h = interpolate(t, [0, 0.5, 1], [240, 90, 70]);
+  return `oklch(${L} ${C} ${h})`;
+}
+function fmtTempC(T_K) {
+  const C = T_K - 273.15;
+  const int = Math.round(C);
+  // Thin-space thousands separator for readability: 1 670 °C.
+  const s = Math.abs(int) >= 1000
+    ? String(int).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009')
+    : String(int);
+  return s + ' °C';
+}
+function fmtTempDeltaC(dK) {
+  const d = dK;
+  const abs = Math.abs(d);
+  if (abs >= 10000) return (d / 1000).toFixed(1) + ' k°C';
+  if (abs >= 1000)  return (d / 1000).toFixed(2) + ' k°C';
+  return Math.round(d) + ' °C';
+}
+
+// ── Trail ──────────────────────────────────────────────────────────────────
+function Trail({ scenarioId, simTime, bodyIdx, maxLen = 500 }) {
+  if (scenarioId === 'static_fly' && bodyIdx === 2) return null;
+  const trail = getTrail(scenarioId, simTime, bodyIdx, maxLen);
+  if (trail.length < 2) return null;
+  const segs = [];
+  for (let i = 1; i < trail.length; i++) {
+    const t = i / trail.length;
+    const op = Math.pow(t, 1.8) * 0.9;
+    const w = 0.3 + t * 1.6;
+    segs.push(
+      <line
+        key={i}
+        x1={sx(trail[i - 1].x)} y1={sy(trail[i - 1].y)}
+        x2={sx(trail[i].x)}     y2={sy(trail[i].y)}
+        stroke={FG} strokeOpacity={op} strokeWidth={w} strokeLinecap="round"
+      />
+    );
+  }
+  return <g>{segs}</g>;
+}
+
+function remapStaticFlyBody(simTime, bodyIdx, snap, body) {
+  if (bodyIdx !== 2) return body;
+  const planet = snap[PLANET_IDX];
+  if (!planet) return body;
+  const yOffset = interpolate(
+    [0, 1.15, 2.45, 4.2],
+    [0, 2.55, 0.02, -0.78],
+    [Easing.easeOutCubic, Easing.easeInCubic, Easing.easeInCubic]
+  )(simTime);
+  const xOffset = interpolate(
+    [0, 1.15, 2.45, 4.2],
+    [0, -0.08, 0.06, 0.18],
+    [Easing.easeOutCubic, Easing.easeInOutCubic, Easing.easeInCubic]
+  )(simTime);
+  return {
+    ...body,
+    x: body.x + xOffset,
+    y: body.y + yOffset,
+  };
+}
+
+// ── Body rendering ─────────────────────────────────────────────────────────
+// Size in px scales with star radius in sim units (via starRadius()).
+// The planet always renders at r=3 for visibility, except during 大撕裂
+// where it can be shattered.
+function Body({ scenarioId, simTime, bodyIdx, dimmedIfDistantFromIdx = null }) {
+  const snap = sampleScenario(scenarioId, simTime);
+  const rawSelf = snap[bodyIdx];
+  const self = scenarioId === 'static_fly'
+    ? remapStaticFlyBody(simTime, bodyIdx, snap, rawSelf)
+    : rawSelf;
+  if (!self || !self.alive) return null;
+  const isPlanet = bodyIdx === PLANET_IDX;
+  const r = isPlanet ? 3 : Math.max(4, starRadius(self.m) * WORLD_SCALE * 0.8);
+  let opacity = 1;
+  let glowOp = 1;
+  const T = isPlanet
+    ? equilibriumTempK(bodyIdx, snap)
+    : starSurfaceTempK(self.m);
+  const tint = isPlanet ? PLANET_HIGHLIGHT : '#ffffff';
+  const px = sx(self.x), py = sy(self.y);
+  const label = BODY_NAMES[bodyIdx];
+
+  return (
+    <g opacity={opacity}>
+      {isPlanet ? (
+        <>
+          <circle cx={px} cy={py} r={r + 7} fill={PLANET_HIGHLIGHT} opacity={0.18} />
+          <circle cx={px} cy={py} r={r + 4} fill="none" stroke={PLANET_HIGHLIGHT} strokeOpacity={0.8} strokeWidth={1.1} />
+          <circle cx={px} cy={py} r={r} fill={tint} />
+        </>
+      ) : (
+        <>
+          <circle cx={px} cy={py} r={r * 2.4} fill={tint} opacity={glowOp || 0.1} />
+          <circle cx={px} cy={py} r={r} fill={tint} />
+        </>
+      )}
+      <text
+        x={px + r + 8} y={py - 2}
+        fill={FG_DIM} fontSize={isPlanet ? 11 : 13} fontFamily={HELVETICA}
+        style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: isPlanet ? '0.12em' : 0 }}
+      >
+        {label}
+      </text>
+      {!isPlanet && (
+        <text
+          x={px + r + 8} y={py + 11}
+          fill={FG_FAINT} fontSize={10} fontFamily={HELVETICA}
+          style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '0.04em' }}
+        >
+          {fmtTempC(T)}
+        </text>
+      )}
+    </g>
+  );
+}
+
+// ── Deterministic PRNG for stable debris ───────────────────────────────────
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function() {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ── Collision effects (flash, shockwave, debris) ──────────────────────────
+function CollisionEffects({ scenarioId, simTime }) {
+  const events = getCollisions(scenarioId);
+  if (!events || !events.length) return null;
+  const out = [];
+  for (let e = 0; e < events.length; e++) {
+    const ev = events[e];
+    const age = simTime - ev.t;
+    if (age < 0 || age > 3.0) continue;
+    const cx = sx(ev.x), cy = sy(ev.y);
+    const mT = ev.mA + ev.mB;
+    const energy = Math.min(1, mT * ev.vrel * 0.9);
+
+    if (age < 0.18) {
+      const a = 1 - age / 0.18;
+      out.push(<circle key={`f${e}`} cx={cx} cy={cy} r={30 + 180 * (1 - a)} fill={FG} opacity={a * 0.35} />);
+      out.push(<circle key={`fc${e}`} cx={cx} cy={cy} r={6 + 30 * (1 - a)} fill={FG} opacity={a * 0.9} />);
+    }
+    if (age < 1.4) {
+      const p = age / 1.4;
+      const r = 20 + 260 * Easing.easeOutCubic(p);
+      const op = (1 - p) * 0.55;
+      out.push(<circle key={`r${e}`} cx={cx} cy={cy} r={r} fill="none" stroke={FG} strokeOpacity={op} strokeWidth={1.2} />);
+    }
+    const rnd = mulberry32(1337 + e * 97);
+    const N = 22 + Math.floor(energy * 18);
+    const MAX_AGE = 2.6;
+    if (age < MAX_AGE) {
+      for (let k = 0; k < N; k++) {
+        const theta = rnd() * Math.PI * 2;
+        const speed = (120 + rnd() * 220) * (0.7 + energy * 0.6);
+        const ca = Math.cos(theta), sa = Math.sin(theta);
+        const drag = Math.exp(-age * 0.35);
+        const dist = speed * age * (0.6 + 0.4 * drag);
+        const x = cx + ca * dist;
+        const y = cy + sa * dist;
+        const lifeT = age / MAX_AGE;
+        const op = Math.max(0, (1 - lifeT) ** 1.4);
+        const size = (1.2 + rnd() * 2.2) * (1 - lifeT * 0.4);
+        const tailLen = 6 + speed * 0.012 * (1 - lifeT);
+        const tx = x - ca * tailLen;
+        const ty = y - sa * tailLen;
+        out.push(<line key={`d${e}-${k}t`} x1={tx} y1={ty} x2={x} y2={y} stroke={FG} strokeOpacity={op * 0.55} strokeWidth={size * 0.6} strokeLinecap="round" />);
+        out.push(<circle key={`d${e}-${k}`} cx={x} cy={y} r={size} fill={FG} opacity={op} />);
+      }
+    }
+  }
+  return <g>{out}</g>;
+}
+
+// ── Persistent temperature readout (always visible during scenarios) ──────
+// Sits at the bottom-right of the stage. Shows planet equilibrium temp in °C
+// and tints with a color derived from the same temperature scale used for
+// the stars. This is the "throughline" metric — every scenario has one.
+function TempReadout({ scenarioId, simTime }) {
+  const snap = sampleScenario(scenarioId, simTime);
+  const p = snap[PLANET_IDX];
+  if (!p || !p.alive) return null;
+  const T = equilibriumTempK(PLANET_IDX, snap);
+  const C = T - 273.15;
+  const tint = tempToColor(T);
+
+  // Format: integer °C, no k-units — always in °C so the scale stays honest.
+  // Very hot temperatures will show e.g. "1 620 °C" with a thin space.
+  const absC = Math.abs(C);
+  let body;
+  if (absC >= 1000) {
+    const int = Math.round(C);
+    const s = String(int).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009');
+    body = s;
+  } else {
+    body = String(Math.round(C));
+  }
+
+  // Qualitative descriptor.
+  let label;
+  if (T < 150)      label = '极寒 / 冻结';
+  else if (T < 240) label = '冰期';
+  else if (T < 290) label = '寒冷';
+  else if (T < 320) label = '宜居';
+  else if (T < 400) label = '炎热';
+  else if (T < 700) label = '高温 / 失控';
+  else if (T < 1500) label = '熔融';
+  else              label = '等离子';
+
+  return (
+    <div style={{
+      position: 'absolute',
+      right: 40, bottom: 74,
+      width: 280,
+      padding: '16px 18px',
+      background: 'rgba(14,14,14,0.7)',
+      border: '1px solid rgba(242,240,234,0.18)',
+      fontFamily: HELVETICA,
+      color: FG,
+      pointerEvents: 'none',
+    }}>
+      <div style={{
+        fontSize: 10, letterSpacing: '0.22em', color: FG_DIM,
+        marginBottom: 10,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+      }}>
+        <span>三体星 · 平衡温度</span>
+        <span style={{ color: FG_FAINT, fontSize: 9 }}>°C</span>
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 8,
+        fontVariantNumeric: 'tabular-nums', lineHeight: 1,
+      }}>
+        <span style={{ fontSize: 44, color: tint, letterSpacing: '0.01em', fontWeight: 300 }}>
+          {body}
+        </span>
+        <span style={{ fontSize: 18, color: tint, opacity: 0.8 }}>°C</span>
+      </div>
+      <div style={{
+        marginTop: 10,
+        fontSize: 10.5, color: FG_DIM,
+        letterSpacing: '0.1em',
+      }}>
+        {label}
+      </div>
+      {/* Temperature bar: symmetric log-ish scale around habitable band. */}
+      <TempBar T={T} tint={tint} />
+    </div>
+  );
+}
+
+function TempBar({ T, tint }) {
+  // Map log10(T[K]) from 1.4 (≈25 K) to 3.7 (≈5000 K) across 0..1.
+  const t = Math.max(0, Math.min(1, (Math.log10(Math.max(T, 10)) - 1.4) / 2.3));
+  // Habitable band: 250 – 320 K → log10 ≈ 2.40 – 2.51.
+  const habLo = (Math.log10(250) - 1.4) / 2.3;
+  const habHi = (Math.log10(320) - 1.4) / 2.3;
+  return (
+    <div style={{
+      marginTop: 12, height: 4,
+      background: 'rgba(242,240,234,0.1)',
+      position: 'relative',
+    }}>
+      {/* habitable band marker */}
+      <div style={{
+        position: 'absolute',
+        left: `${habLo * 100}%`,
+        width: `${(habHi - habLo) * 100}%`,
+        top: -1, bottom: -1,
+        background: 'rgba(242,240,234,0.22)',
+      }}/>
+      {/* current temp indicator */}
+      <div style={{
+        position: 'absolute',
+        left: `calc(${t * 100}% - 1px)`,
+        top: -3, bottom: -3, width: 2,
+        background: tint,
+        transition: 'left 90ms linear',
+      }}/>
+    </div>
+  );
+}
+
+// ── Per-scenario metric HUD ────────────────────────────────────────────────
+// Each metric renders a small corner panel appropriate to its scenario.
+function MetricHUD({ scenarioId, simTime, metric }) {
+  const snap = sampleScenario(scenarioId, simTime);
+  const planet = snap[PLANET_IDX];
+  if (!planet || !planet.alive) return null;
+
+  // Common container — sits ABOVE the persistent temperature card.
+  const boxStyle = {
+    position: 'absolute',
+    right: 40, bottom: 210,
+    width: 280,
+    padding: '14px 16px',
+    background: 'rgba(14,14,14,0.55)',
+    border: '1px solid rgba(242,240,234,0.16)',
+    fontFamily: HELVETICA,
+    color: FG,
+    pointerEvents: 'none',
+  };
+  const kickerStyle = { fontSize: 10, letterSpacing: '0.22em', color: FG_DIM, marginBottom: 8 };
+  const bigStyle = { fontSize: 26, letterSpacing: '0.02em', fontVariantNumeric: 'tabular-nums', color: FG, lineHeight: 1.1 };
+  const subStyle = { fontSize: 10.5, color: FG_FAINT, marginTop: 6, letterSpacing: '0.08em', fontVariantNumeric: 'tabular-nums' };
+
+  if (metric === 'flux') {
+    const f = incomingFlux(PLANET_IDX, snap);
+    return (
+      <div style={boxStyle}>
+        <div style={kickerStyle}>三体星 · 辐射通量</div>
+        <div style={bigStyle}>
+          {f >= 100 ? f.toFixed(0) : f.toFixed(2)} ×
+        </div>
+        <div style={subStyle}>
+          相当地球辐照的 {f >= 10 ? f.toFixed(1) : f.toFixed(2)} 倍
+        </div>
+      </div>
+    );
+  }
+
+  if (metric === 'temperature_cold' || metric === 'temperature' || metric === 'flux_hot' || metric === 'flux_melt') {
+    // These cases are fully covered by the persistent TempReadout now.
+    return null;
+  }
+
+  if (metric === 'flux_ratio_distant') {
+    // How much of the planet's flux comes from the CLOSEST star vs the farthest?
+    // γ is the "flying star" — show its contribution ratio.
+    const fluxes = [];
+    for (let j = 0; j < 3; j++) {
+      const s = snap[j];
+      if (!s.alive) { fluxes.push(0); continue; }
+      const dx = s.x - planet.x, dy = s.y - planet.y;
+      fluxes.push(luminosity(s.m) / (dx*dx + dy*dy + 0.02));
+    }
+    const total = fluxes.reduce((a,b) => a+b, 0);
+    // γ (idx 2) is the distant one in this scenario.
+    const gammaRatio = total > 0 ? fluxes[2] / total : 0;
+    return (
+      <div style={boxStyle}>
+        <div style={kickerStyle}>γ 星 · 辐照占比</div>
+        <div style={bigStyle}>{(gammaRatio * 100).toFixed(2)} %</div>
+        <div style={subStyle}>
+          γ 在三体星天空中只相当一颗亮星
+        </div>
+      </div>
+    );
+  }
+
+  if (metric === 'approach') {
+    // γ's closing velocity vs apparent angular speed against the binary.
+    const gamma = snap[2];
+    const dx = gamma.x - planet.x, dy = gamma.y - planet.y;
+    const d = Math.hypot(dx, dy);
+    const vRad = ((gamma.vx - planet.vx) * dx + (gamma.vy - planet.vy) * dy) / (d + 1e-6);
+    const vrel = { x: gamma.vx - planet.vx, y: gamma.vy - planet.vy };
+    // tangential component
+    const vTan = Math.abs((-vrel.x * dy + vrel.y * dx) / (d + 1e-6));
+    const angSpeed = vTan / (d + 1e-6); // rad per sim-time
+    return (
+      <div style={boxStyle}>
+        <div style={kickerStyle}>γ 星 · 视运动</div>
+        <div style={bigStyle}>{angSpeed.toFixed(4)} <span style={{fontSize: 14, color: FG_DIM}}>rad/t</span></div>
+        <div style={subStyle}>
+          视速度 ≈ 0 · 径向闭合 {(-vRad).toFixed(2)} · 距离 {d.toFixed(2)}
+        </div>
+      </div>
+    );
+  }
+
+  if (metric === 'tide') {
+    const t = tidalAccel(PLANET_IDX, snap);
+    const critical = 40; // visual threshold
+    return (
+      <div style={boxStyle}>
+        <div style={kickerStyle}>三体星 · 潮汐强度</div>
+        <div style={{...bigStyle, color: t > critical ? '#f2c08a' : FG}}>
+          {t < 1 ? t.toFixed(3) : t.toFixed(2)}
+        </div>
+        <div style={subStyle}>
+          2GM/r³ · {t > critical ? '逼近洛希极限' : '正常'}
+        </div>
+        {/* Bar */}
+        <div style={{
+          marginTop: 10, height: 3,
+          background: 'rgba(242,240,234,0.1)', position: 'relative',
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            width: `${Math.min(100, (t / critical) * 60)}%`,
+            background: t > critical ? '#f2c08a' : FG,
+            transition: 'width 80ms linear',
+          }}/>
+          <div style={{
+            position: 'absolute', left: '60%', top: -3, bottom: -3, width: 1,
+            background: 'rgba(242,240,234,0.3)',
+          }}/>
+        </div>
+      </div>
+    );
+  }
+
+  if (metric === 'torn') {
+    const p = snap[PLANET_IDX];
+    const shattered = !p.alive;
+    // Count surviving fragments (indices 4..11 in 大撕裂 bodies array).
+    let fragAlive = 0;
+    for (let i = 4; i < snap.length; i++) {
+      if (snap[i] && snap[i].alive) fragAlive++;
+    }
+    const t = shattered ? 0 : tidalAccel(PLANET_IDX, snap);
+    const ROCHE = 60;
+    const frac = Math.min(1, t / ROCHE);
+    return (
+      <div style={boxStyle}>
+        <div style={kickerStyle}>{shattered ? '三体星 · 残骸' : '潮汐 / 洛希极限'}</div>
+        <div style={{...bigStyle, color: (shattered || frac >= 1) ? '#e88c6a' : FG}}>
+          {shattered ? `${fragAlive}` : `${(frac * 100).toFixed(0)} %`}
+        </div>
+        <div style={subStyle}>
+          {shattered ? '碎片 · 重新分配给三颗恒星' : (frac >= 1 ? '超过阈值 · 三体星解体' : '潮汐力接近临界')}
+        </div>
+        {!shattered && (
+          <div style={{
+            marginTop: 10, height: 3,
+            background: 'rgba(242,240,234,0.1)', position: 'relative',
+          }}>
+            <div style={{
+              position: 'absolute', inset: 0,
+              width: `${frac * 100}%`,
+              background: frac >= 1 ? '#e88c6a' : FG,
+              transition: 'width 80ms linear',
+            }}/>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ── Special-effect overlays ────────────────────────────────────────────────
+// Per-scenario extra visuals that go on top of the base simulation view.
+
+// Freeze — ice-crust rings around the planet when deeply cold (三颗飞星).
+function FreezeOverlay({ scenarioId, simTime }) {
+  const snap = sampleScenario(scenarioId, simTime);
+  const p = snap[PLANET_IDX];
+  if (!p || !p.alive) return null;
+  const T = equilibriumTempK(PLANET_IDX, snap);
+  if (T > 220) return null;
+  const frost = Math.max(0, Math.min(1, (220 - T) / 180));
+  const px = sx(p.x), py = sy(p.y);
+  // Six-pointed ice crystal spikes around the planet
+  const spikes = [];
+  const N = 6;
+  const len = 12 + frost * 14;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2 + simTime * 0.1;
+    const x1 = px + Math.cos(a) * 6;
+    const y1 = py + Math.sin(a) * 6;
+    const x2 = px + Math.cos(a) * (6 + len);
+    const y2 = py + Math.sin(a) * (6 + len);
+    spikes.push(
+      <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke="#cde8ff" strokeOpacity={frost * 0.8} strokeWidth={0.9} strokeLinecap="round" />
+    );
+  }
+  return (
+    <g>
+      <circle cx={px} cy={py} r={9} fill="none" stroke="#cde8ff" strokeOpacity={frost * 0.4} strokeWidth={0.6} />
+      {spikes}
+    </g>
+  );
+}
+
+// Melt — corona flares around stars when they're close & hot (三日凌空, 双日凌空).
+function MeltOverlay({ scenarioId, simTime }) {
+  const snap = sampleScenario(scenarioId, simTime);
+  const p = snap[PLANET_IDX];
+  if (!p || !p.alive) return null;
+  const T = equilibriumTempK(PLANET_IDX, snap);
+  if (T < 400) return null;
+  const heat = Math.max(0, Math.min(1, (T - 400) / 2000));
+  const px = sx(p.x), py = sy(p.y);
+  // Heat-shimmer ring
+  const rings = [];
+  const rnd = mulberry32(Math.floor(simTime * 10));
+  for (let i = 0; i < 3; i++) {
+    const a = rnd() * Math.PI * 2;
+    const r = 14 + i * 6 + Math.sin(simTime * 3 + i) * 2;
+    rings.push(
+      <circle key={i} cx={px} cy={py} r={r}
+        fill="none" stroke="#f2c08a" strokeOpacity={heat * 0.35 * (1 - i * 0.3)} strokeWidth={0.7} />
+    );
+  }
+  return <g>{rings}</g>;
+}
+
+// Syzygy line — bright line through aligned stars + planet.
+function SyzygyOverlay({ scenarioId, simTime }) {
+  const snap = sampleScenario(scenarioId, simTime);
+  const stars = [snap[0], snap[1], snap[2]].filter(b => b.alive);
+  if (stars.length < 3) return null;
+  // Fit a line (least-squares) through stars + planet, compute residual.
+  const pts = [...stars, snap[PLANET_IDX]].filter(b => b.alive);
+  if (pts.length < 3) return null;
+  // Compute principal axis via covariance
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p.x; my += p.y; }
+  mx /= pts.length; my /= pts.length;
+  let sxx = 0, syy = 0, sxy = 0;
+  for (const p of pts) {
+    const dx = p.x - mx, dy = p.y - my;
+    sxx += dx*dx; syy += dy*dy; sxy += dx*dy;
+  }
+  // Angle of major axis
+  const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const ca = Math.cos(theta), sa = Math.sin(theta);
+  // Residual (perpendicular spread)
+  let resid = 0;
+  for (const p of pts) {
+    const dx = p.x - mx, dy = p.y - my;
+    const perp = -dx * sa + dy * ca;
+    resid += perp * perp;
+  }
+  resid = Math.sqrt(resid / pts.length);
+  // Closer to 0 = more aligned. Visualize when resid < 0.5.
+  const alignment = Math.max(0, 1 - resid / 0.5);
+  if (alignment < 0.1) return null;
+  const LEN = 3.2; // sim units along axis
+  const x1 = sx(mx - ca * LEN), y1 = sy(my - sa * LEN);
+  const x2 = sx(mx + ca * LEN), y2 = sy(my + sa * LEN);
+  return (
+    <g>
+      <line x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke={FG} strokeOpacity={alignment * 0.55} strokeWidth={0.8} strokeDasharray="6 4" />
+    </g>
+  );
+}
+
+// Tear — planet shatters when tidal force crosses threshold (大撕裂).
+// Renders:
+//   • pre-shatter: elongated warning glyph on the planet (stretch + hairline fractures)
+//   • post-shatter: 8 real fragment bodies with trails, evolving under the
+//     three stars' gravity (simulated — not a particle effect).
+function TearOverlay({ scenarioId, simTime }) {
+  const snap = sampleScenario(scenarioId, simTime);
+  const p = snap[PLANET_IDX];
+  const shattered = !p.alive;
+
+  // ── Post-shatter: render fragments (bodyIdx 4..11) with trails ──────────
+  if (shattered) {
+    const FRAG_IDX = [4, 5, 6, 7, 8, 9, 10, 11];
+    return (
+      <g>
+        {FRAG_IDX.map(i => (
+          <FragmentTrail key={`ft${i}`} scenarioId={scenarioId} simTime={simTime} bodyIdx={i} />
+        ))}
+        {FRAG_IDX.map(i => {
+          const b = snap[i];
+          if (!b || !b.alive) return null;
+          return (
+            <g key={`fb${i}`}>
+              <circle cx={sx(b.x)} cy={sy(b.y)} r={2.6}
+                fill={PLANET_HIGHLIGHT} opacity={0.95} />
+              <circle cx={sx(b.x)} cy={sy(b.y)} r={5}
+                fill={PLANET_HIGHLIGHT} opacity={0.18} />
+            </g>
+          );
+        })}
+      </g>
+    );
+  }
+
+  // ── Pre-shatter warning glyph on the intact planet ──────────────────────
+  const tide = tidalAccel(PLANET_IDX, snap);
+  const ROCHE = 60;
+  if (tide < ROCHE * 0.5) return null;
+
+  // Principal tide direction (toward nearest massive star).
+  let bestStar = 0, bestStrength = 0;
+  for (let j = 0; j < 3; j++) {
+    if (!snap[j].alive) continue;
+    const dx = snap[j].x - p.x, dy = snap[j].y - p.y;
+    const d = Math.hypot(dx, dy) + 1e-6;
+    const s = snap[j].m / (d * d * d);
+    if (s > bestStrength) { bestStrength = s; bestStar = j; }
+  }
+  const near = snap[bestStar];
+  const ddx = near.x - p.x, ddy = near.y - p.y;
+  const dd = Math.hypot(ddx, ddy) + 1e-6;
+  const ux = ddx / dd, uy = ddy / dd;
+
+  const px = sx(p.x), py = sy(p.y);
+  const strain = Math.min(1.2, (tide - ROCHE * 0.5) / (ROCHE * 0.5));
+  const elongation = 1 + strain * 2.2;
+  const out = [];
+  out.push(
+    <ellipse key="el" cx={px} cy={py}
+      rx={3 + elongation * 2.2} ry={2.6}
+      transform={`rotate(${Math.atan2(uy, ux) * 180 / Math.PI} ${px} ${py})`}
+      fill="#e88c6a" opacity={0.35 + strain * 0.3} />
+  );
+  const rnd = mulberry32(Math.floor(simTime * 20));
+  for (let k = 0; k < 3; k++) {
+    const off = (rnd() - 0.5) * 5;
+    const L = (6 + elongation * 5) * (0.6 + rnd() * 0.6);
+    const x1 = px - ux * L * 0.5 + (-uy) * off;
+    const y1 = py - uy * L * 0.5 + ( ux) * off;
+    const x2 = px + ux * L * 0.5 + (-uy) * off;
+    const y2 = py + uy * L * 0.5 + ( ux) * off;
+    out.push(
+      <line key={`fr${k}`} x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke="#f2c08a" strokeOpacity={0.5} strokeWidth={0.5} />
+    );
+  }
+  return <g>{out}</g>;
+}
+
+// Small trail renderer for fragment bodies (starts from shatter moment, so
+// we can reuse getTrail — it naturally clips to alive frames).
+function FragmentTrail({ scenarioId, simTime, bodyIdx }) {
+  const pts = getTrail(scenarioId, simTime, bodyIdx, 260);
+  if (pts.length < 2) return null;
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x)} ${sy(p.y)}`).join(' ');
+  return (
+    <path d={d} stroke={PLANET_HIGHLIGHT} strokeOpacity={0.35} strokeWidth={0.8} fill="none" />
+  );
+}
+
+// ── FactCard ───────────────────────────────────────────────────────────────
+function FactCard({ kicker, title, body, x, y, width = 360 }) {
+  const { localTime, duration } = useSprite();
+  const entry = 0.6, exit = 0.6;
+  const hold = duration - entry - exit;
+  let op = 1, ty = 0;
+  if (localTime < entry) {
+    const t = Easing.easeOutCubic(localTime / entry);
+    op = t; ty = (1 - t) * 10;
+  } else if (localTime > entry + hold) {
+    const t = Easing.easeInCubic((localTime - entry - hold) / exit);
+    op = 1 - t; ty = -t * 6;
+  }
+  return (
+    <div style={{
+      position: 'absolute', left: x, top: y, width,
+      opacity: op, transform: `translateY(${ty}px)`,
+      fontFamily: HELVETICA, color: FG, pointerEvents: 'none',
+    }}>
+      <div style={{
+        fontSize: 10, letterSpacing: '0.22em', color: FG_DIM,
+        marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <span style={{ width: 18, height: 1, background: FG_DIM, display: 'inline-block' }}/>
+        {kicker}
+      </div>
+      {title && (
+        <div style={{
+          fontSize: 28, fontWeight: 500, lineHeight: 1.35,
+          letterSpacing: '0.01em', marginBottom: 12,
+        }}>{title}</div>
+      )}
+      {body && (
+        <div style={{
+          fontSize: 14, lineHeight: 1.75, letterSpacing: '0.02em',
+          color: 'rgba(242,240,234,0.75)', textWrap: 'pretty',
+        }}>{body}</div>
+      )}
+    </div>
+  );
+}
+
+// ── Scenario HUD ───────────────────────────────────────────────────────────
+function ScenarioHUD({ idx, name, kicker, tagline, simTime }) {
+  return (
+    <>
+      <div style={{
+        position: 'absolute', left: 40, top: 32,
+        fontFamily: HELVETICA, color: FG,
+        fontSize: 11, letterSpacing: '0.22em',
+      }}>
+        <div style={{ color: FG_DIM, marginBottom: 6 }}>{SCENARIO_SERIES_TITLE}</div>
+        <div style={{ fontSize: 22, letterSpacing: '0.12em', fontWeight: 500, display: 'flex', alignItems: 'baseline', gap: 14 }}>
+          <span style={{ color: FG_DIM, fontSize: 14, letterSpacing: '0.08em' }}>{kicker}</span>
+          <span>{name}</span>
+        </div>
+        <div style={{ marginTop: 8, color: FG_DIM, fontSize: 12, letterSpacing: '0.04em' }}>
+          {tagline}
+        </div>
+      </div>
+      <div style={{
+        position: 'absolute', right: 40, top: 32,
+        fontFamily: HELVETICA, color: FG_DIM,
+        fontSize: 11, letterSpacing: '0.22em', textAlign: 'right',
+      }}>
+        <div style={{ marginBottom: 6 }}>仿真时间</div>
+        <div style={{ fontSize: 22, color: FG, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.06em' }}>
+          t = {simTime.toFixed(2)}
+        </div>
+      </div>
+      {/* Step indicator */}
+      <div style={{
+        position: 'absolute', left: 40, bottom: 36,
+        display: 'flex', gap: 10,
+        fontFamily: HELVETICA, color: FG_DIM,
+        fontSize: 11, letterSpacing: '0.18em',
+      }}>
+        {Array.from({ length: TOTAL_SCENARIOS }).map((_, i) => (
+          <div key={i} style={{
+            width: 22, height: 2,
+            background: i < idx ? FG_DIM : i === idx ? FG : FG_FAINT,
+            opacity: i === idx ? 1 : 0.6,
+          }}/>
+        ))}
+        <div style={{ marginLeft: 12, color: FG_DIM, fontVariantNumeric: 'tabular-nums' }}>
+          {String(idx + 1).padStart(2, '0')} / {String(TOTAL_SCENARIOS).padStart(2, '0')}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Single scenario scene ──────────────────────────────────────────────────
+function ScenarioScene({ idx, scenario, startT, factSchedule }) {
+  const time = useTime();
+  const localT = time - startT;
+  const durT = scenario.duration;
+  const simSpeed = scenario.simSpeed || 1.2;
+  const simTime = Math.max(0, localT) * simSpeed;
+  if (localT < 0 || localT > durT) return null;
+
+  const fadeIn  = Math.min(1, localT / 0.6);
+  const fadeOut = Math.min(1, (durT - localT) / 0.8);
+  const opacity = Math.max(0, Math.min(fadeIn, fadeOut));
+
+  const id = scenario.id;
+  // For the "飞星" scenarios, bodies get dimmed based on distance from the
+  // planet so distant stars genuinely look like bright points.
+  const applyBrightnessDim = (id === 'fly_star' || id === 'three_fly' || id === 'static_fly');
+
+  return (
+    <div data-screen-label={`0${idx + 1} ${scenario.name}`} style={{ position: 'absolute', inset: 0, opacity }}>
+      <svg width={W} height={H} style={{ position: 'absolute', inset: 0 }}>
+        <Trail scenarioId={id} simTime={simTime} bodyIdx={0} />
+        <Trail scenarioId={id} simTime={simTime} bodyIdx={1} />
+        <Trail scenarioId={id} simTime={simTime} bodyIdx={2} />
+        <Trail scenarioId={id} simTime={simTime} bodyIdx={3} />
+        <CollisionEffects scenarioId={id} simTime={simTime} />
+        {/* Scenario-specific overlays that sit UNDER bodies */}
+        {id === 'syzygy' && <SyzygyOverlay scenarioId={id} simTime={simTime} />}
+        {/* Bodies */}
+        <Body scenarioId={id} simTime={simTime} bodyIdx={0}
+          dimmedIfDistantFromIdx={applyBrightnessDim ? PLANET_IDX : null} />
+        <Body scenarioId={id} simTime={simTime} bodyIdx={1}
+          dimmedIfDistantFromIdx={applyBrightnessDim ? PLANET_IDX : null} />
+        <Body scenarioId={id} simTime={simTime} bodyIdx={2}
+          dimmedIfDistantFromIdx={applyBrightnessDim ? PLANET_IDX : null} />
+        <Body scenarioId={id} simTime={simTime} bodyIdx={3} />
+        {/* Scenario-specific overlays that sit OVER bodies */}
+        {id === 'three_fly' && <FreezeOverlay scenarioId={id} simTime={simTime} />}
+        {(id === 'twin_suns' || id === 'tri_suns') && <MeltOverlay scenarioId={id} simTime={simTime} />}
+        {id === 'great_tear' && <TearOverlay scenarioId={id} simTime={simTime} />}
+      </svg>
+
+      <MetricHUD scenarioId={id} simTime={simTime} metric={scenario.metric} />
+      <TempReadout scenarioId={id} simTime={simTime} />
+
+      <ScenarioHUD
+        idx={idx}
+        name={scenario.name}
+        kicker={scenario.kicker}
+        tagline={scenario.tagline}
+        simTime={simTime}
+      />
+
+      {factSchedule && factSchedule.map((f, i) => (
+        <Sprite key={i} start={startT + f.at} end={startT + f.at + f.dur}>
+          <FactCard
+            kicker={f.kicker}
+            title={f.title}
+            body={f.body}
+            x={f.x} y={f.y}
+            width={f.width || 380}
+          />
+        </Sprite>
+      ))}
+    </div>
+  );
+}
+
+// ── Intro & outro ──────────────────────────────────────────────────────────
+function IntroScene() {
+  const time = useTime();
+  if (time > INTRO_DUR + 0.2) return null;
+  const fadeOut = Math.max(0, Math.min(1, (INTRO_DUR - time) / 0.8));
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, opacity: fadeOut,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      fontFamily: HELVETICA, color: FG,
+    }}>
+      <Sprite start={0} end={INTRO_DUR}>
+        {({ localTime }) => {
+          const t1 = Math.min(1, localTime / 0.8);
+          const t2 = Math.min(1, Math.max(0, (localTime - 0.4) / 1.0));
+          const t3 = Math.min(1, Math.max(0, (localTime - 1.6) / 1.2));
+          const t4 = Math.min(1, Math.max(0, (localTime - 3.0) / 1.4));
+          return (
+            <>
+              <div style={{
+                fontSize: 74, fontWeight: 400,
+                letterSpacing: '0.06em', lineHeight: 1.04,
+                opacity: t2,
+                transform: `translateY(${(1 - t2) * 16 - 44}px)`,
+              }}>
+                {INTRO_TITLE}
+              </div>
+              <div style={{
+                marginTop: 54, fontSize: 17,
+                color: 'rgba(242,240,234,0.6)',
+                maxWidth: 760, textAlign: 'center', lineHeight: 2.0,
+                letterSpacing: '0.045em',
+                opacity: t3,
+                transform: `translateY(${(1 - t3) * 8 + 6}px)`,
+              }}>
+                在三体世界里，太阳明天是否会升起，谁也不知道。
+                <br/>
+                它会短暂进入<em style={{ color: FG, fontStyle: 'normal' }}>恒纪元</em>，又再次跌回<em style={{ color: FG, fontStyle: 'normal' }}>乱纪元</em>，在秩序与失序之间反复震荡。
+              </div>
+              <div style={{
+                marginTop: 72,
+                display: 'flex', gap: 30, flexWrap: 'wrap', justifyContent: 'center',
+                maxWidth: 860,
+                opacity: t4,
+                transform: `translateY(${(1 - t4) * 8 + 18}px)`,
+              }}>
+                {SCENARIOS.map((s, i) => (
+                  <div key={s.id} style={{
+                    fontSize: 12,
+                    color: 'rgba(242,240,234,0.72)',
+                    letterSpacing: '0.16em',
+                    display: 'flex', alignItems: 'baseline', gap: 8,
+                  }}>
+                    <span style={{ color: FG_FAINT, fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
+                    {s.name}
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        }}
+      </Sprite>
+    </div>
+  );
+}
+
+function OutroScene({ startT }) {
+  const time = useTime();
+  const localT = time - startT;
+  if (localT < 0 || localT > OUTRO_DUR + 0.1) return null;
+  return (
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <Sprite start={startT + 0.0} end={startT + OUTRO_DUR}>
+        {({ localTime }) => {
+          const t1 = Math.min(1, localTime / 0.8);
+          const t2 = Math.min(1, Math.max(0, (localTime - 0.6) / 1.0));
+          const t3 = Math.min(1, Math.max(0, (localTime - 2.0) / 1.2));
+          const fadeOut = Math.max(0, Math.min(1, (OUTRO_DUR - localTime) / 0.8));
+          return (
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              fontFamily: HELVETICA, color: FG,
+              textAlign: 'center', padding: '0 80px',
+              opacity: fadeOut,
+            }}>
+              <div style={{
+                fontSize: 11, letterSpacing: '0.28em', color: FG_DIM,
+                marginBottom: 28, opacity: t1,
+                transform: `translateY(${(1 - t1) * 8}px)`,
+              }}>结语</div>
+              <div style={{
+                fontSize: 52, fontWeight: 400, letterSpacing: '0.02em',
+                lineHeight: 1.3, maxWidth: 960,
+                opacity: t2,
+                transform: `translateY(${(1 - t2) * 14}px)`,
+              }}>
+                给岁月以文明，<br/>
+                而不是给文明以岁月。
+              </div>
+              <div style={{
+                marginTop: 36, fontSize: 13,
+                color: FG_FAINT,
+                letterSpacing: '0.22em',
+                opacity: t3,
+                transform: `translateY(${(1 - t3) * 8}px)`,
+              }}>
+                阿然 ｜ AI 瞎折腾　·　2026 年 4 月 18 日
+              </div>
+            </div>
+          );
+        }}
+      </Sprite>
+    </div>
+  );
+}
+
+// ── Fact schedules per scenario ────────────────────────────────────────────
+// Keep copy sparse; let the simulation breathe.
+
+const FACTS = {
+  stable_era: [
+    {
+      at: 0.6, dur: 4.8,
+      kicker: '第一大天象 / 恒纪元',
+      title: '三体星暂时拥有一个稳定的太阳。',
+      body: '此时三体星主要围绕一颗近处恒星运行，另外两颗恒星只是在远方缓慢漂移。农时、昼夜与气候终于短暂变得可预期。',
+      x: 60, y: 560, width: 420,
+    },
+    {
+      at: 4.8, dur: 2.8,
+      kicker: '物理解读',
+      title: '稳定，只是暂时的恩赐。',
+      body: '当一颗恒星主导引力与辐照时，世界就会进入恒纪元。但在三体系统里，这种秩序无法永久维持，下一次扰动迟早会到来。',
+      x: 820, y: 120, width: 420,
+    },
+  ],
+  fly_star: [
+    {
+      at: 0.6, dur: 5.0,
+      kicker: '第二大天象 / 飞星',
+      title: '三颗恒星里，有一颗飞远了。',
+      body: '三体星绕着一对紧密的双星运行，另一颗恒星远在天边。从三体星上看，它不再是太阳——只是一颗比金星更亮的亮星。',
+      x: 60, y: 560, width: 400,
+    },
+    {
+      at: 6.5, dur: 4.5,
+      kicker: '物理解读',
+      title: '光随距离平方衰减。',
+      body: '距离翻倍，辐照落到四分之一。γ 虽亮，却几乎不给三体星供暖——它在历法里被记作「飞星」。',
+      x: 820, y: 120, width: 400,
+    },
+  ],
+  three_fly: [
+    {
+      at: 0.6, dur: 4.5,
+      kicker: '第三大天象 / 三颗飞星',
+      title: '三颗恒星同时远离。',
+      body: '系统动量向外，三体星被抛在了一片黑色里。所有光源都变成了遥远的亮点。',
+      x: 60, y: 560, width: 400,
+    },
+    {
+      at: 6.0, dur: 4.5,
+      kicker: '物理解读',
+      title: '辐射通量骤降，全球冻结。',
+      body: '当 Σ L/r² → 0，平衡温度接近宇宙微波背景。大气液化、海洋结冰——这是恒纪元最冷的极端。',
+      x: 820, y: 120, width: 400,
+    },
+  ],
+  static_fly: [
+    {
+      at: 0.6, dur: 4.5,
+      kicker: '第四大天象 / 飞星不动',
+      title: '天上一颗星，突然停住了。',
+      body: 'γ 相对三体星的视角速度接近零——它的运动几乎完全指向我们。',
+      x: 60, y: 560, width: 400,
+    },
+    {
+      at: 5.5, dur: 5.0,
+      kicker: '危险信号',
+      title: '这不是静止。是直撞。',
+      body: '当恒星的切向视速度≈0 而径向闭合速度很大，意味着近距离掠过甚至碰撞即将发生——古代三体人视其为凶兆。',
+      x: 820, y: 120, width: 400,
+    },
+  ],
+  twin_suns: [
+    {
+      at: 0.6, dur: 4.5,
+      kicker: '第五大天象 / 双日凌空',
+      title: '两颗太阳同时登台。',
+      body: '它们悬在三体星两侧，三体星同时接受两份辐照——热负荷陡增，大气失控。',
+      x: 60, y: 560, width: 400,
+    },
+    {
+      at: 5.5, dur: 4.0,
+      kicker: '物理解读',
+      title: '辐射通量 × 2。',
+      body: '只要两颗恒星都不太远，三体星就会进入「双日凌空」的高温状态。',
+      x: 820, y: 120, width: 400,
+    },
+  ],
+  tri_suns: [
+    {
+      at: 0.6, dur: 4.5,
+      kicker: '第六大天象 / 三日凌空',
+      title: '三颗太阳，同时在天上。',
+      body: '三体星被三份辐照同时烤着——这是乱纪元中最致命的天象之一。',
+      x: 60, y: 560, width: 400,
+    },
+    {
+      at: 5.5, dur: 4.0,
+      kicker: '物理解读',
+      title: '表面熔融。',
+      body: '岩石开始流动，海洋蒸发成等离子。文明在此前必须脱水、埋藏、等待。',
+      x: 820, y: 120, width: 400,
+    },
+  ],
+  syzygy: [
+    {
+      at: 0.6, dur: 4.5,
+      kicker: '第七大天象 / 三日连珠',
+      title: '三颗恒星与三体星近乎共线。',
+      body: '引力不再四散，而是沿着一根轴叠加——潮汐力骤然上升。',
+      x: 60, y: 560, width: 420,
+    },
+    {
+      at: 6.5, dur: 4.5,
+      kicker: '物理解读',
+      title: '潮汐 ∝ 2GM/r³。',
+      body: '距离的三次方放大了近处恒星的影响。连珠时刻，三体星地壳与海洋同时响应——这是地震与海啸的窗口。',
+      x: 820, y: 120, width: 400,
+    },
+  ],
+  great_tear: [
+    {
+      at: 0.6, dur: 4.5,
+      kicker: '第八大天象 / 大撕裂',
+      title: '一颗恒星太近了。',
+      body: '当潮汐力超过三体星自身的束缚——洛希极限——三体星将被拉成长条，最终碎裂。',
+      x: 60, y: 560, width: 420,
+    },
+    {
+      at: 5.5, dur: 5.0,
+      kicker: '终章',
+      title: '这是对三体世界的最终警告。',
+      body: '在三颗恒星主导的相空间里，只要一次恰好的近距掠过，任何尺度的结构都可能被扯开。',
+      x: 820, y: 120, width: 400,
+    },
+  ],
+};
+
+// ── Top-level scene ────────────────────────────────────────────────────────
+function ThreeBodyScene() {
+  const time = useTime();
+
+  // Build a flat schedule: intro, [scenario + INTER_DUR]×7, outro.
+  let cursor = INTRO_DUR;
+  const scheduled = SCENARIOS.map((sc) => {
+    const startT = cursor;
+    cursor += sc.duration + INTER_DUR;
+    return { scenario: sc, startT };
+  });
+  const outroStart = cursor;
+
+  return (
+    <>
+      <BackgroundGrid />
+      <IntroScene />
+      {scheduled.map((s, i) => (
+        <ScenarioScene
+          key={s.scenario.id}
+          idx={i}
+          scenario={s.scenario}
+          startT={s.startT}
+          factSchedule={FACTS[s.scenario.id] || []}
+        />
+      ))}
+      <OutroScene startT={outroStart} />
+    </>
+  );
+}
+
+// Compute total duration up-front so the Stage knows it.
+function computeTotalDuration() {
+  let t = INTRO_DUR;
+  for (const s of SCENARIOS) t += s.duration + INTER_DUR;
+  t += OUTRO_DUR;
+  return t;
+}
+
+function BackgroundGrid() {
+  const dots = [];
+  const step = 80;
+  for (let x = step; x < W; x += step) {
+    for (let y = step; y < H; y += step) {
+      dots.push(<circle key={`${x}-${y}`} cx={x} cy={y} r={0.8} fill={FG} opacity={0.04} />);
+    }
+  }
+  return (
+    <svg width={W} height={H} style={{ position: 'absolute', inset: 0 }}>
+      {dots}
+      <line x1={CX - 12} y1={CY} x2={CX + 12} y2={CY} stroke={FG} strokeOpacity={0.12} strokeWidth={1} />
+      <line x1={CX} y1={CY - 12} x2={CX} y2={CY + 12} stroke={FG} strokeOpacity={0.12} strokeWidth={1} />
+    </svg>
+  );
+}
+
+Object.assign(window, {
+  ThreeBodyScene,
+  TOTAL_DURATION: computeTotalDuration(),
+  STAGE_W: W, STAGE_H: H, BG_COLOR: BG,
+  SCENARIO_INTRO_DUR: INTRO_DUR,
+  SCENARIO_INTER_DUR: INTER_DUR,
+});
+
+</script>
+
+<script type="text/babel">
+  // Pre-compute every scenario's physics BEFORE first render.
+  rebuildScenarios();
+
+  const App = () => {
+    return (
+      <Stage
+        width={STAGE_W}
+        height={STAGE_H}
+        duration={TOTAL_DURATION}
+        background={BG_COLOR}
+        persistKey="threebody"
+      >
+        <ThreeBodyScene />
+      </Stage>
+    );
+  };
+
+  const TweaksLayer = () => {
+    return <TweaksPanel />;
+  };
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  ReactDOM.createRoot(document.getElementById('tweaks-root')).render(<TweaksLayer />);
+</script>
+</body>
+</html>
+

@@ -1,0 +1,63 @@
+{
+  "name": "three-body-desktop-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Three Body desktop lab with cinematic story mode and interactive four-body controls.",
+  "author": "Codex + crane",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:web\" \"npm:dev:electron\"",
+    "dev:web": "vite",
+    "dev:electron": "wait-on tcp:5173 && electron .",
+    "build": "vite build",
+    "test": "vitest run",
+    "package": "npm run build && electron-builder",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:mac:zip": "npm run build && electron-builder --mac zip",
+    "package:mac:dmg": "npm run build && electron-builder --mac dmg",
+    "package:win": "npm run build && electron-builder --win",
+    "package:release": "bash scripts/package-release.sh"
+  },
+  "build": {
+    "appId": "com.crane.threebody",
+    "productName": "ThreeBodyLab",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "mac": {
+      "artifactName": "三体实验室-${version}-${arch}-mac.${ext}",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "artifactName": "三体实验室-${version}-${arch}.${ext}",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^9.1.2",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "jsdom": "^24.1.1",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.3",
+    "wait-on": "^8.0.1"
+  }
+}

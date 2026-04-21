@@ -27,7 +27,7 @@ const BODY_PRESETS = [
     label: 'γ',
     type: 'star',
     color: DEFAULT_BODY_COLOR,
-    physics: { m: 0.86, x: 0.2, y: 1.85, vx: -0.36, vy: -0.12 },
+    physics: { m: 0.86, x: 0.2, y: 1.85, vx: -0.16, vy: -0.12 },
     visual: { color: DEFAULT_BODY_COLOR, glow: GLOW_MIN, trail: 1.1, visible: true },
   },
   {
@@ -123,6 +123,8 @@ function applyStoryScenarioToSimulatorState(scenarioId) {
       duration: Math.max(14, scenario.duration + 4),
       simSpeed: scenario.simSpeed || 1,
       noStarCollisions: !!scenario.noStarCollisions,
+      shatter: scenario.shatter || null,
+      extraBodies: scenario.bodies.slice(4).map((b) => ({ ...b })),
     },
     meta: {
       sourceScenarioId: scenario.id,

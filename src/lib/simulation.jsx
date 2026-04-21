@@ -12,12 +12,25 @@
 
 const G = 1.0;
 const DT = 0.005;
+const STORY_STAR_RENDER_WORLD_SCALE = 180;
+const STORY_STAR_RENDER_FACTOR = 0.8;
+const STORY_STAR_BASE_HALO_FACTOR = 2.4;
+const STORY_STAR_PIXEL_SCALE = STORY_STAR_RENDER_WORLD_SCALE * STORY_STAR_RENDER_FACTOR;
 
 // Stellar radius scales roughly with mass^0.7 on main sequence; we collapse
 // into sim units so a 1.0-M star looks ~0.09 sim units across.
 function starRadius(m) {
   return 0.06 + 0.05 * Math.min(1.6, Math.pow(Math.max(0.1, m), 0.7));
 }
+
+function storyStarRadiusPx(m) {
+  return Math.max(4, starRadius(m) * STORY_STAR_PIXEL_SCALE);
+}
+
+function storyStarHaloRadiusPx(radiusPx) {
+  return radiusPx * STORY_STAR_BASE_HALO_FACTOR;
+}
+
 function luminosity(m) {
   return Math.pow(Math.max(0.05, m), 3.5);
 }
@@ -437,7 +450,58 @@ function createSimulationCache({
     },
   );
 
-  return { snapshots, collisions, steps, dt: DT, simSpeed, duration };
+  return {
+    snapshots,
+    collisions,
+    steps,
+    dt: DT,
+    duration,
+    simSpeed,
+    noStarCollisions,
+    shatter,
+  };
+}
+
+function extendSimulationCache(
+  cache,
+  {
+    extendBySeconds = 12,
+    noStarCollisions = cache?.noStarCollisions ?? false,
+    shatter = cache?.shatter ?? null,
+  } = {},
+) {
+  if (!cache?.snapshots?.length) return cache;
+
+  const extraSteps = Math.max(1, Math.ceil(extendBySeconds / cache.dt));
+  const tailState = cache.snapshots[cache.steps - 1].map((body) => ({ ...body }));
+  const { snapshots: nextSnapshots, collisions: nextCollisions } = simulate(
+    tailState,
+    cache.dt,
+    extraSteps,
+    {
+      noStarCollisions,
+      shatter,
+    },
+  );
+
+  const stepOffset = cache.steps;
+  const timeOffset = cache.steps * cache.dt;
+
+  return {
+    ...cache,
+    snapshots: [...cache.snapshots, ...nextSnapshots],
+    collisions: [
+      ...cache.collisions,
+      ...nextCollisions.map((event) => ({
+        ...event,
+        step: event.step + stepOffset,
+        t: event.t + timeOffset,
+      })),
+    ],
+    steps: cache.steps + nextSnapshots.length,
+    noStarCollisions,
+    shatter,
+  };
 }
 
 function rebuildScenarios() {
@@ -512,6 +576,7 @@ export {
   SCENARIOS,
   SIM_CACHE,
   createSimulationCache,
+  extendSimulationCache,
   getCollisions,
   getTrail,
   getTrailFromCache,
@@ -522,4 +587,6 @@ export {
   sampleSimulationCache,
   simulate,
   starRadius,
+  storyStarHaloRadiusPx,
+  storyStarRadiusPx,
 };

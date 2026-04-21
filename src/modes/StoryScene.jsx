@@ -12,7 +12,8 @@ import {
   getTrail,
   luminosity,
   sampleScenario,
-  starRadius,
+  storyStarHaloRadiusPx,
+  storyStarRadiusPx,
 } from '../lib/simulation.jsx';
 
 // scene.jsx — 三体 · 七种天象
@@ -176,7 +177,7 @@ function Body({ scenarioId, simTime, bodyIdx, dimmedIfDistantFromIdx = null }) {
     : rawSelf;
   if (!self || !self.alive) return null;
   const isPlanet = bodyIdx === PLANET_IDX;
-  const r = isPlanet ? 3 : Math.max(4, starRadius(self.m) * WORLD_SCALE * 0.8);
+  const r = isPlanet ? 3 : storyStarRadiusPx(self.m);
   let opacity = 1;
   let glowOp = 1;
   const T = isPlanet
@@ -196,7 +197,7 @@ function Body({ scenarioId, simTime, bodyIdx, dimmedIfDistantFromIdx = null }) {
         </>
       ) : (
         <>
-          <circle cx={px} cy={py} r={r * 2.4} fill={tint} opacity={glowOp || 0.1} />
+          <circle cx={px} cy={py} r={storyStarHaloRadiusPx(r)} fill={tint} opacity={glowOp || 0.1} />
           <circle cx={px} cy={py} r={r} fill={tint} />
         </>
       )}

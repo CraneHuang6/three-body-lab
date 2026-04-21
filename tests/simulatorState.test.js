@@ -3,6 +3,7 @@ import {
   applyStoryScenarioToSimulatorState,
   randomizeSimulatorState,
 } from '../src/lib/simulatorState.js';
+import { createSimulationCache } from '../src/lib/simulation.jsx';
 
 describe('simulatorState', () => {
   it('creates a four-body editable simulator state with physics and visual controls', () => {
@@ -58,5 +59,19 @@ describe('simulatorState', () => {
     const state = createDefaultSimulatorState();
 
     expect(state.meta.name).toBe('默认模拟');
+  });
+
+  it('avoids star-star collisions in the initial default simulator window', () => {
+    const state = createDefaultSimulatorState();
+    const cache = createSimulationCache({
+      bodies: state.bodies.map((body) => ({ ...body.physics })),
+      duration: state.simConfig.duration,
+      simSpeed: state.simConfig.simSpeed,
+      noStarCollisions: state.simConfig.noStarCollisions,
+      shatter: state.simConfig.shatter || null,
+    });
+
+    const starCollisions = cache.collisions.filter((event) => !event.shatter);
+    expect(starCollisions).toHaveLength(0);
   });
 });

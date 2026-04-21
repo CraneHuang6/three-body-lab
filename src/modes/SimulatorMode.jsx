@@ -2,10 +2,12 @@ import React from 'react';
 import {
   PLANET_M,
   createSimulationCache,
+  extendSimulationCache,
   getTrailFromCache,
   luminosity,
   sampleSimulationCache,
-  starRadius,
+  storyStarHaloRadiusPx,
+  storyStarRadiusPx,
 } from '../lib/simulation.jsx';
 import {
   applyStoryScenarioToSimulatorState,
@@ -35,15 +37,34 @@ const qualityMap = {
   },
 };
 
+const CACHE_EXTENSION_THRESHOLD_SECONDS = 2;
+const CACHE_EXTENSION_CHUNK_SECONDS = 12;
+const CAMERA_FOLLOW_LERP = 0.08;
+const PLANET_FINALE_DURATION_SECONDS = 2;
+const PLANET_FINALE_FRAGMENT_COUNT = 5;
+const PLANET_FINALE_SPEED_MIN = 0.28;
+const PLANET_FINALE_SPEED_SPAN = 0.18;
+const PLANET_FINALE_SIZE_MIN = 7;
+const PLANET_FINALE_SIZE_SPAN = 4;
+const PLANET_FINALE_ROTATION_RANGE_DEG = 70;
+const PLANET_FINALE_HUE_SHIFT_RANGE = 24;
+
 const panelFont = '"IBM Plex Sans", "Helvetica Neue", "PingFang SC", sans-serif';
 const monoFont = '"IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace';
 
-function sx(x) {
-  return CENTER_X + x * WORLD_SCALE;
+function projectSimX(x, cameraX = 0) {
+  return CENTER_X + (x - cameraX) * WORLD_SCALE;
 }
 
-function sy(y) {
-  return CENTER_Y - y * WORLD_SCALE;
+function projectSimY(y, cameraY = 0) {
+  return CENTER_Y - (y - cameraY) * WORLD_SCALE;
+}
+
+function advanceCameraCenter(prev, target, followLerp = CAMERA_FOLLOW_LERP) {
+  return {
+    x: prev.x + ((target.x - prev.x) * followLerp),
+    y: prev.y + ((target.y - prev.y) * followLerp),
+  };
 }
 
 function formatMass(body) {
@@ -99,10 +120,7 @@ function useAnimationTime({ duration, playing, resetKey }) {
       if (lastRef.current == null) lastRef.current = ts;
       const dt = (ts - lastRef.current) / 1000;
       lastRef.current = ts;
-      setTime((prev) => {
-        const next = prev + dt;
-        return next >= duration ? next % duration : next;
-      });
+      setTime((prev) => advanceSimulatorTime(prev, dt, duration));
       rafRef.current = requestAnimationFrame(frame);
     };
 
@@ -116,7 +134,121 @@ function useAnimationTime({ duration, playing, resetKey }) {
   return [time, setTime];
 }
 
-function CollisionEffects({ collisions, simTime, qualityProfile, colors }) {
+function advanceSimulatorTime(prev, dt, duration) {
+  return prev + dt;
+}
+
+function shouldAutoResetSimulation(aliveCount) {
+  return aliveCount === 0;
+}
+
+function shouldStartPlanetFinale(planet, finaleActive) {
+  return !!planet && !planet.alive && !finaleActive;
+}
+
+function shouldCompletePlanetFinale(elapsed, duration = PLANET_FINALE_DURATION_SECONDS) {
+  return elapsed >= duration;
+}
+
+function resolveSimulatorPlaybackTransition({
+  simTime,
+  playing,
+  aliveCount,
+  planet,
+  planetFinale,
+  hasAutoReset,
+  presentationInterrupted,
+}) {
+  if (presentationInterrupted || !playing) {
+    return { type: 'none' };
+  }
+
+  if (planetFinale) {
+    const elapsed = simTime - planetFinale.startTime;
+    if (shouldCompletePlanetFinale(elapsed)) {
+      return { type: 'startReset' };
+    }
+    return { type: 'none' };
+  }
+
+  if (shouldStartPlanetFinale(planet, false)) {
+    return {
+      type: 'startPlanetFinale',
+      origin: { x: planet.x, y: planet.y },
+    };
+  }
+
+  if (shouldAutoResetSimulation(aliveCount) && !hasAutoReset) {
+    return { type: 'startReset' };
+  }
+
+  return { type: 'none' };
+}
+
+function createDeterministicRandom(seed) {
+  let value = seed >>> 0;
+
+  return () => {
+    value = (value + 0x6D2B79F5) >>> 0;
+    let t = value;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function createPlanetFinaleFragments({ x, y, seed = 314, eventId = 'planet-finale' }) {
+  // x/y are world coordinates; seed keeps repeated playback within one event stable,
+  // and eventId keeps fragment keys unique across separate finale events.
+  const nextRand = createDeterministicRandom(seed);
+  return Array.from({ length: PLANET_FINALE_FRAGMENT_COUNT }, (_, index) => {
+    const angle = ((index + 0.5) / PLANET_FINALE_FRAGMENT_COUNT) * Math.PI * 2;
+    const speed = PLANET_FINALE_SPEED_MIN + (nextRand() * PLANET_FINALE_SPEED_SPAN);
+    const rotation = (nextRand() - 0.5) * PLANET_FINALE_ROTATION_RANGE_DEG;
+
+    return {
+      id: `${eventId}-${index}`,
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: PLANET_FINALE_SIZE_MIN + (nextRand() * PLANET_FINALE_SIZE_SPAN),
+      rotation,
+      hueShift: (nextRand() - 0.5) * PLANET_FINALE_HUE_SHIFT_RANGE,
+    };
+  });
+}
+
+function getSimulatorGlyphMetrics({ bodyType, mass, glow }) {
+  if (bodyType === 'planet') {
+    const radius = 5 + glow * 1.8;
+    return {
+      radius,
+      haloRadius: radius * (1.15 + glow * 1.9),
+      haloOpacity: glow <= 0 ? 0 : 0.08 + glow * 0.42,
+    };
+  }
+
+  if (bodyType === 'fragment') {
+    const radius = 2.6 + glow * 1.5;
+    return {
+      radius,
+      haloRadius: radius * (1.4 + glow * 2.2),
+      haloOpacity: glow <= 0 ? 0 : 0.12 + glow * 0.55,
+    };
+  }
+
+  const radius = storyStarRadiusPx(mass);
+  const baseHaloRadius = storyStarHaloRadiusPx(radius);
+  const boostedHaloRadius = radius * (1.2 + glow * 2.5);
+  return {
+    radius,
+    haloRadius: Math.max(baseHaloRadius, boostedHaloRadius),
+    haloOpacity: glow <= 0 ? 0 : Math.min(1, 0.3 + glow * 0.5),
+  };
+}
+
+function CollisionEffects({ collisions, simTime, qualityProfile, colors, cameraCenter }) {
   const profile = qualityMap[qualityProfile];
   const out = [];
 
@@ -125,8 +257,8 @@ function CollisionEffects({ collisions, simTime, qualityProfile, colors }) {
     const age = simTime - event.t;
     if (age < 0 || age > 2.6) continue;
 
-    const cx = sx(event.x);
-    const cy = sy(event.y);
+    const cx = projectSimX(event.x, cameraCenter.x);
+    const cy = projectSimY(event.y, cameraCenter.y);
     const baseColor = colors[event.survivor] || '#f2f0ea';
     const flashOpacity = Math.max(0, 1 - age / 0.16);
     const shockProgress = Math.min(1, age / 1.5);
@@ -183,7 +315,70 @@ function CollisionEffects({ collisions, simTime, qualityProfile, colors }) {
   return <g>{out}</g>;
 }
 
-function BodyTrail({ cache, simTime, bodyIndex, color, qualityProfile, trailScale }) {
+function PlanetFinaleEffects({ finale, simTime, cameraCenter }) {
+  if (!finale) return null;
+
+  const elapsed = Math.max(0, simTime - finale.startTime);
+  const blastOpacity = Math.max(0, 1 - elapsed / 0.22);
+  const shockProgress = Math.min(1, elapsed / PLANET_FINALE_DURATION_SECONDS);
+  const cx = projectSimX(finale.origin.x, cameraCenter.x);
+  const cy = projectSimY(finale.origin.y, cameraCenter.y);
+
+  return (
+    <g className="planet-finale-overlay" data-layer="planet-finale">
+      <circle
+        cx={cx}
+        cy={cy}
+        r={34 + elapsed * 240}
+        fill="#ffe0bf"
+        opacity={blastOpacity * 0.38}
+      />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={42 + shockProgress * 220}
+        fill="none"
+        stroke="#ffbf86"
+        strokeOpacity={(1 - shockProgress) * 0.72}
+        strokeWidth={2.4}
+      />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={18 + shockProgress * 140}
+        fill="none"
+        stroke="#fff4e7"
+        strokeOpacity={(1 - shockProgress) * 0.44}
+        strokeWidth={1.3}
+      />
+      {finale.fragments.map((fragment) => {
+        const fx = fragment.x + fragment.vx * elapsed * 12;
+        const fy = fragment.y + fragment.vy * elapsed * 12;
+        const fragmentX = projectSimX(fx, cameraCenter.x);
+        const fragmentY = projectSimY(fy, cameraCenter.y);
+        return (
+          <g key={fragment.id} transform={`translate(${fragmentX} ${fragmentY}) rotate(${fragment.rotation + elapsed * 180})`}>
+            <circle
+              r={fragment.size * 1.85}
+              fill="#ffb36b"
+              opacity={0.16}
+            />
+            <path
+              d={`M ${fragment.size * -0.9} ${fragment.size * -0.35} L ${fragment.size * 0.2} ${fragment.size * -1.1} L ${fragment.size} 0 L ${fragment.size * -0.1} ${fragment.size} L ${fragment.size * -1.05} ${fragment.size * 0.35} Z`}
+              fill="#ffd7b0"
+              fillOpacity="0.92"
+              stroke="#fff5e8"
+              strokeOpacity="0.5"
+              strokeWidth="0.8"
+            />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function BodyTrail({ cache, simTime, bodyIndex, color, qualityProfile, trailScale, cameraCenter }) {
   const trail = getTrailFromCache(
     cache,
     simTime,
@@ -201,10 +396,10 @@ function BodyTrail({ cache, simTime, bodyIndex, color, qualityProfile, trailScal
         return (
           <line
             key={`${bodyIndex}-${index}`}
-            x1={sx(prev.x)}
-            y1={sy(prev.y)}
-            x2={sx(point.x)}
-            y2={sy(point.y)}
+            x1={projectSimX(prev.x, cameraCenter.x)}
+            y1={projectSimY(prev.y, cameraCenter.y)}
+            x2={projectSimX(point.x, cameraCenter.x)}
+            y2={projectSimY(point.y, cameraCenter.y)}
             stroke={color}
             strokeOpacity={opacity}
             strokeWidth={0.5 + opacity * 1.8}
@@ -216,46 +411,43 @@ function BodyTrail({ cache, simTime, bodyIndex, color, qualityProfile, trailScal
   );
 }
 
-function BodyGlyph({ body, snap, index }) {
+function BodyGlyph({ body, snap, index, cameraCenter }) {
   if (!snap?.alive || !body.visual.visible) return null;
 
-  const isPlanet = body.type === 'planet';
-  const glow = body.visual.glow;
-  const radius = isPlanet
-    ? 5 + glow * 1.8
-    : Math.max(7, starRadius(snap.m) * WORLD_SCALE * 0.72);
-  const haloRadius = radius * (isPlanet ? 1.15 + glow * 1.9 : 1.2 + glow * 2.5);
-  const haloOpacity = glow <= 0
-    ? 0
-    : isPlanet
-      ? 0.08 + glow * 0.42
-      : 0.05 + glow * 0.5;
+  const isFragment = body.type === 'fragment';
+  const { radius, haloRadius, haloOpacity } = getSimulatorGlyphMetrics({
+    bodyType: body.type,
+    mass: snap.m,
+    glow: body.visual.glow,
+  });
 
   return (
     <g>
       <circle
-        cx={sx(snap.x)}
-        cy={sy(snap.y)}
+        cx={projectSimX(snap.x, cameraCenter.x)}
+        cy={projectSimY(snap.y, cameraCenter.y)}
         r={haloRadius}
         fill={body.visual.color}
         opacity={haloOpacity}
       />
       <circle
-        cx={sx(snap.x)}
-        cy={sy(snap.y)}
+        cx={projectSimX(snap.x, cameraCenter.x)}
+        cy={projectSimY(snap.y, cameraCenter.y)}
         r={radius}
         fill={body.visual.color}
       />
-      <text
-        x={sx(snap.x) + radius + 8}
-        y={sy(snap.y) - 4}
-        fill="rgba(242,240,234,0.65)"
-        fontSize="11"
-        fontFamily={monoFont}
-        letterSpacing="0.16em"
-      >
-        {body.label}
-      </text>
+      {!isFragment && (
+        <text
+          x={projectSimX(snap.x, cameraCenter.x) + radius + 8}
+          y={projectSimY(snap.y, cameraCenter.y) - 4}
+          fill="rgba(242,240,234,0.65)"
+          fontSize="11"
+          fontFamily={monoFont}
+          letterSpacing="0.16em"
+        >
+          {body.label}
+        </text>
+      )}
     </g>
   );
 }
@@ -419,22 +611,42 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
   const [surfaceSize, setSurfaceSize] = React.useState({ width: WIDTH, height: HEIGHT });
   const [autoResetCounter, setAutoResetCounter] = React.useState(0);
   const hasAutoResetRef = React.useRef(false);
+  const presentationInterruptPendingRef = React.useRef(false);
   const [showResetOverlay, setShowResetOverlay] = React.useState(false);
   const [isResetOverlayFading, setIsResetOverlayFading] = React.useState(false);
+  const [planetFinale, setPlanetFinale] = React.useState(null);
+  const [cameraCenter, setCameraCenter] = React.useState({ x: 0, y: 0 });
+  const clearResetPresentation = React.useCallback(() => {
+    presentationInterruptPendingRef.current = true;
+    hasAutoResetRef.current = false;
+    setPlanetFinale(null);
+    setShowResetOverlay(false);
+    setIsResetOverlayFading(false);
+  }, []);
 
   const physicsKey = React.useMemo(
     () => JSON.stringify(simulatorState.bodies.map((body) => body.physics)),
     [simulatorState.bodies],
   );
 
-  const cache = React.useMemo(() => createSimulationCache({
-    bodies: simulatorState.bodies.map((body) => ({
-      ...body.physics,
-    })),
+  const cacheConfig = React.useMemo(() => ({
+    bodies: [
+      ...simulatorState.bodies.map((body) => ({
+        ...body.physics,
+      })),
+      ...(simulatorState.simConfig.extraBodies || []),
+    ],
     duration: simulatorState.simConfig.duration,
     simSpeed: simulatorState.simConfig.simSpeed,
     noStarCollisions: simulatorState.simConfig.noStarCollisions,
-  }), [physicsKey, simulatorState.simConfig.duration, simulatorState.simConfig.noStarCollisions, simulatorState.simConfig.simSpeed, autoResetCounter]);
+    shatter: simulatorState.simConfig.shatter || null,
+  }), [physicsKey, simulatorState.simConfig.duration, simulatorState.simConfig.noStarCollisions, simulatorState.simConfig.simSpeed, simulatorState.simConfig.shatter, simulatorState.simConfig.extraBodies, autoResetCounter]);
+
+  const [cache, setCache] = React.useState(() => createSimulationCache(cacheConfig));
+
+  React.useEffect(() => {
+    setCache(createSimulationCache(cacheConfig));
+  }, [cacheConfig]);
 
   const [simTime, setSimTime] = useAnimationTime({
     duration: simulatorState.simConfig.duration,
@@ -443,20 +655,107 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
   });
 
   const snapshot = sampleSimulationCache(cache, simTime);
-  const allDestroyed = snapshot.every((b) => !b.alive);
+  const aliveCount = snapshot.filter((b) => b.alive).length;
+  const cacheEndTime = cache.steps * cache.dt;
+  const planet = snapshot[3];
 
   React.useEffect(() => {
-    if (allDestroyed && playing && !hasAutoResetRef.current) {
+    if (cacheEndTime - simTime > CACHE_EXTENSION_THRESHOLD_SECONDS) return;
+
+    setCache((prev) => {
+      const prevEndTime = prev.steps * prev.dt;
+      if (prevEndTime - simTime > CACHE_EXTENSION_THRESHOLD_SECONDS) {
+        return prev;
+      }
+      return extendSimulationCache(prev, {
+        extendBySeconds: Math.max(
+          CACHE_EXTENSION_CHUNK_SECONDS,
+          prev.duration,
+        ),
+      });
+    });
+  }, [cacheEndTime, simTime]);
+
+  React.useEffect(() => {
+    const resetPlanet = simulatorState.bodies[3]?.physics;
+    if (!resetPlanet) return;
+    setCameraCenter({
+      x: resetPlanet.x,
+      y: resetPlanet.y,
+    });
+  }, [physicsKey, autoResetCounter, simulatorState.bodies]);
+
+  React.useEffect(() => {
+    if (!planet?.alive) return;
+    setCameraCenter((prev) => advanceCameraCenter(prev, {
+      x: planet.x,
+      y: planet.y,
+    }));
+  }, [planet?.alive, planet?.x, planet?.y]);
+
+  React.useEffect(() => {
+    if (!planetFinale && !showResetOverlay && simTime === 0) {
+      presentationInterruptPendingRef.current = false;
+    }
+  }, [planetFinale, showResetOverlay, simTime]);
+
+  React.useEffect(() => {
+    const transition = resolveSimulatorPlaybackTransition({
+      simTime,
+      playing,
+      aliveCount,
+      planet,
+      planetFinale,
+      hasAutoReset: hasAutoResetRef.current,
+      presentationInterrupted: presentationInterruptPendingRef.current,
+    });
+
+    if (transition.type === 'startPlanetFinale') {
+      setPlanetFinale({
+        startTime: simTime,
+        origin: transition.origin,
+        fragments: createPlanetFinaleFragments({
+          x: transition.origin.x,
+          y: transition.origin.y,
+          eventId: `planet-finale-${simTime.toFixed(3)}`,
+        }),
+      });
+      return;
+    }
+
+    if (transition.type === 'startReset' && !planetFinale) {
       hasAutoResetRef.current = true;
       setPlaying(false);
       setAutoResetCounter((c) => c + 1);
       setSimTime(0);
       setShowResetOverlay(true);
       setIsResetOverlayFading(false);
-    } else if (!allDestroyed) {
+    } else if (!shouldAutoResetSimulation(aliveCount)) {
       hasAutoResetRef.current = false;
     }
-  }, [allDestroyed, playing, setSimTime]);
+  }, [aliveCount, planet, planetFinale, playing, setSimTime, simTime]);
+
+  React.useEffect(() => {
+    const transition = resolveSimulatorPlaybackTransition({
+      simTime,
+      playing,
+      aliveCount,
+      planet,
+      planetFinale,
+      hasAutoReset: hasAutoResetRef.current,
+      presentationInterrupted: presentationInterruptPendingRef.current,
+    });
+
+    if (transition.type !== 'startReset' || !planetFinale) return;
+
+    setPlanetFinale(null);
+    hasAutoResetRef.current = true;
+    setPlaying(false);
+    setAutoResetCounter((c) => c + 1);
+    setSimTime(0);
+    setShowResetOverlay(true);
+    setIsResetOverlayFading(false);
+  }, [aliveCount, planet, planetFinale, playing, setSimTime, simTime]);
 
   React.useEffect(() => {
     if (showResetOverlay) {
@@ -473,7 +772,20 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
     }
   }, [showResetOverlay]);
 
-  const colors = simulatorState.bodies.map((body) => body.visual.color);
+  const renderBodies = React.useMemo(() => {
+    const extras = simulatorState.simConfig.extraBodies || [];
+    return [
+      ...simulatorState.bodies,
+      ...extras.map((_, i) => ({
+        id: `frag-${i}`,
+        label: '',
+        type: 'fragment',
+        visual: { color: '#35e6ff', glow: 0, trail: 0.3, visible: true },
+      })),
+    ];
+  }, [simulatorState.bodies, simulatorState.simConfig.extraBodies]);
+
+  const colors = renderBodies.map((body) => body.visual.color);
   const planetTemp = React.useMemo(() => equilibriumTempK(snapshot), [snapshot]);
 
   const totalFlux = React.useMemo(() => {
@@ -488,6 +800,9 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
   }, [snapshot]);
 
   const updateBody = React.useCallback((bodyIndex, section, key, value) => {
+    if (section === 'physics') {
+      clearResetPresentation();
+    }
     setSimulatorState((prev) => ({
       ...prev,
       bodies: prev.bodies.map((body, index) => {
@@ -501,22 +816,35 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
         };
       }),
     }));
-  }, []);
+  }, [clearResetPresentation]);
 
   const applyPreset = React.useCallback((presetId) => {
     setSelectedPreset(presetId);
+    clearResetPresentation();
     if (presetId === 'default') {
       setSimulatorState(createDefaultSimulatorState());
       return;
     }
     setSimulatorState(applyStoryScenarioToSimulatorState(presetId));
-  }, []);
+  }, [clearResetPresentation]);
 
   const resetParams = React.useCallback(() => {
     setSelectedPreset('default');
+    clearResetPresentation();
     setSimulatorState(createDefaultSimulatorState());
     setSimTime(0);
-  }, [setSimTime]);
+  }, [clearResetPresentation, setSimTime]);
+
+  const randomizeParams = React.useCallback(() => {
+    clearResetPresentation();
+    setSelectedPreset('default');
+    setSimulatorState((prev) => randomizeSimulatorState(prev, 42 + Math.round(simTime * 100)));
+  }, [clearResetPresentation, simTime]);
+
+  const resetTime = React.useCallback(() => {
+    clearResetPresentation();
+    setSimTime(0);
+  }, [clearResetPresentation, setSimTime]);
 
   React.useEffect(() => {
     const element = canvasFullscreenRef.current;
@@ -595,8 +923,8 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
                   {playing ? '暂停' : '继续'}
                 </button>
                 <button className="ghost-button" onClick={resetParams}>重置参数</button>
-                <button className="ghost-button" onClick={() => setSimTime(0)}>重置时间</button>
-                <button className="ghost-button" onClick={() => setSimulatorState(randomizeSimulatorState(simulatorState, 42 + Math.round(simTime * 100)))}>
+                <button className="ghost-button" onClick={resetTime}>重置时间</button>
+                <button className="ghost-button" onClick={randomizeParams}>
                   随机生成
                 </button>
                 </div>
@@ -635,7 +963,7 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
                   />
                 ))}
 
-                {simulatorState.bodies.map((body, index) => (
+                {renderBodies.map((body, index) => (
                   <BodyTrail
                     key={`${body.id}-trail`}
                     cache={cache}
@@ -644,6 +972,7 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
                     color={body.visual.color}
                     qualityProfile={simulatorState.qualityProfile}
                     trailScale={body.visual.trail}
+                    cameraCenter={cameraCenter}
                   />
                 ))}
 
@@ -652,14 +981,22 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
                   simTime={simTime}
                   qualityProfile={simulatorState.qualityProfile}
                   colors={colors}
+                  cameraCenter={cameraCenter}
                 />
 
-                {simulatorState.bodies.map((body, index) => (
+                <PlanetFinaleEffects
+                  finale={planetFinale}
+                  simTime={simTime}
+                  cameraCenter={cameraCenter}
+                />
+
+                {renderBodies.map((body, index) => (
                   <BodyGlyph
                     key={body.id}
                     body={body}
                     snap={snapshot[index]}
                     index={index}
+                    cameraCenter={cameraCenter}
                   />
                 ))}
               </svg>
@@ -706,3 +1043,19 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
     </div>
   );
 }
+
+export {
+  advanceSimulatorTime,
+  advanceCameraCenter,
+  createPlanetFinaleFragments,
+  getSimulatorGlyphMetrics,
+  PLANET_FINALE_DURATION_SECONDS,
+  PLANET_FINALE_FRAGMENT_COUNT,
+  PlanetFinaleEffects,
+  projectSimX,
+  projectSimY,
+  shouldCompletePlanetFinale,
+  shouldAutoResetSimulation,
+  shouldStartPlanetFinale,
+  resolveSimulatorPlaybackTransition,
+};

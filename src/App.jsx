@@ -53,12 +53,19 @@ function StoryMode({ onBack, onSwitchMode, volume, onVolumeChange }) {
   );
 }
 
-function HomeMode({ onEnter }) {
+function HomeMode({ onEnter, volume, onVolumeChange }) {
   return (
     <main className="home-shell">
+      <div className="home-volume">
+        <VolumeControl value={volume} onChange={onVolumeChange} />
+      </div>
       <div className="home-copy">
         <span className="eyebrow">THREE BODY DESKTOP SIMULATOR</span>
-        <h1>三体世界 · 八大天象 · 实时模拟</h1>
+        <h1>
+          <span className="home-title-line">三体世界</span>
+          <span className="home-title-line">八大天象</span>
+          <span className="home-title-line">实时模拟</span>
+        </h1>
         <p>
           观演模式保留完整叙事与时间轴，模拟器模式则允许你实时调整四个天体的初始条件，
           直接观察轨迹、对冲与碰撞如何变化。
@@ -89,8 +96,8 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="app-noise" />
-      <LoopingBgm enabled={mode === 'story' || mode === 'simulator'} volume={bgmVolume} />
-      {mode === 'home' ? <HomeMode onEnter={setMode} /> : null}
+      <LoopingBgm enabled volume={bgmVolume} />
+      {mode === 'home' ? <HomeMode onEnter={setMode} volume={bgmVolume} onVolumeChange={setBgmVolume} /> : null}
       {mode === 'story' ? <StoryMode onBack={() => setMode('home')} onSwitchMode={setMode} volume={bgmVolume} onVolumeChange={setBgmVolume} /> : null}
       {mode === 'simulator' ? <SimulatorMode onBack={() => setMode('home')} onSwitchMode={setMode} volume={bgmVolume} onVolumeChange={setBgmVolume} /> : null}
     </div>

@@ -3,13 +3,18 @@ import path from 'node:path';
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SimulatorMode } from '../src/modes/SimulatorMode.jsx';
+import * as SimulatorModeModule from '../src/modes/SimulatorMode.jsx';
 import { SCENARIOS } from '../src/lib/simulation.jsx';
 
 describe('SimulatorMode preset UI', () => {
   it('renders eight story presets as visible quick-switch controls', () => {
     const html = renderToStaticMarkup(
-      <SimulatorMode onBack={() => {}} onSwitchMode={() => {}} volume={0.55} onVolumeChange={() => {}} />,
+      <SimulatorModeModule.SimulatorMode
+        onBack={() => {}}
+        onSwitchMode={() => {}}
+        volume={0.55}
+        onVolumeChange={() => {}}
+      />,
     );
 
     expect(html).toContain('八大天象默认参数');
@@ -31,5 +36,23 @@ describe('SimulatorMode preset UI', () => {
   it('includes auto-reset overlay class in component source', () => {
     const source = fs.readFileSync(path.resolve(process.cwd(), 'src/modes/SimulatorMode.jsx'), 'utf8');
     expect(source).toContain('simulator-reset-overlay');
+  });
+
+  it('exposes a planet finale render helper that renders the finale layer marker', () => {
+    expect(typeof SimulatorModeModule.PlanetFinaleEffects).toBe('function');
+
+    const markup = renderToStaticMarkup(
+      <SimulatorModeModule.PlanetFinaleEffects
+        finale={{
+          startTime: 0,
+          origin: { x: 0, y: 0 },
+          fragments: [],
+        }}
+        simTime={0.5}
+        cameraCenter={{ x: 0, y: 0 }}
+      />,
+    );
+
+    expect(markup).toContain('planet-finale');
   });
 });

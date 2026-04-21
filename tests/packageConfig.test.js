@@ -34,12 +34,19 @@ describe('package build config', () => {
     expect(pkg.build.win.target).toEqual(['portable']);
   });
 
-  it('defines dual-architecture Windows packaging scripts', () => {
+  it('pins macOS and Windows icons to repo-managed build assets', () => {
+    const pkg = loadPackageJson();
+
+    expect(pkg.build.mac.icon).toBe('build/app-icon.icns');
+    expect(pkg.build.win.icon).toBe('build/app-icon.ico');
+  });
+
+  it('defines x64-only Windows packaging scripts', () => {
     const pkg = loadPackageJson();
 
     expect(pkg.scripts['package:win:x64']).toBe('npm run build && node scripts/package-win.mjs x64');
-    expect(pkg.scripts['package:win:arm64']).toBe('npm run build && node scripts/package-win.mjs arm64');
-    expect(pkg.scripts['package:win:all']).toBe('npm run build && node scripts/package-win.mjs all');
-    expect(pkg.scripts['package:win']).toBe('npm run package:win:all');
+    expect(pkg.scripts['package:win:arm64']).toBeUndefined();
+    expect(pkg.scripts['package:win:all']).toBeUndefined();
+    expect(pkg.scripts['package:win']).toBe('npm run package:win:x64');
   });
 });

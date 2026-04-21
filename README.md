@@ -21,6 +21,12 @@
 - macOS
 - Apple Silicon 芯片（M1 / M2 / M3 / M4）
 
+Windows 试用版当前只提供：
+
+- Windows x64 `portable`
+
+不再提供 Windows ARM64 便携版。
+
 ## 安装步骤
 
 1. 下载 `zip` 文件
@@ -69,3 +75,17 @@
 ## 一句话说明
 
 这是一个可以在 Mac 上直接体验的《三体》风格互动实验室：既能看，也能自己动手试。
+
+## Windows 试用
+
+如果你要在 Windows 电脑上试用，请使用：
+
+- `release/win-portable/x64/三体实验室-0.1.0-x64.exe`
+
+首次打开如果被 SmartScreen 拦截，按下面做：
+
+1. 双击 `.exe`
+2. 在“Windows 已保护你的电脑”提示里点“更多信息”
+3. 再点“仍要运行”
+
+当前 Windows 端只保留 `x64`，适合普通 Intel / AMD Windows 电脑。

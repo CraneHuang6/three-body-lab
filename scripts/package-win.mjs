@@ -4,15 +4,15 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VALID_ARCHS = new Set(['x64', 'arm64', 'all']);
+const VALID_ARCHS = new Set(['x64']);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function resolveArchInput(rawArch) {
-  const arch = rawArch ?? 'all';
+  const arch = rawArch ?? 'x64';
   if (!VALID_ARCHS.has(arch)) {
-    console.error(`Unsupported Windows arch "${arch}". Use x64, arm64, or all.`);
+    console.error(`Unsupported Windows arch "${arch}". Use x64.`);
     process.exit(1);
   }
   return arch;
@@ -70,18 +70,10 @@ function runBuilder(projectDir, arch, releaseRoot, electronDistArg) {
 
 function main() {
   const archInput = resolveArchInput(process.argv[2]);
-  const archs = archInput === 'all' ? ['x64', 'arm64'] : [archInput];
   const projectDir = resolveProjectDir();
   const releaseRoot = resolveReleaseRoot(projectDir);
   const electronDistArg = resolveElectronDistArg();
-
-  if (archInput === 'all') {
-    fs.rmSync(releaseRoot, { recursive: true, force: true });
-  }
-
-  for (const arch of archs) {
-    runBuilder(projectDir, arch, releaseRoot, electronDistArg);
-  }
+  runBuilder(projectDir, archInput, releaseRoot, electronDistArg);
 }
 
 main();

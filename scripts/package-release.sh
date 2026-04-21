@@ -12,8 +12,6 @@ MAC_ZIP_NAME="electron-v31.7.7-darwin-arm64.zip"
 MAC_ZIP_SHA256="e81b75a185376effcc7dd15aef8877ab48474633e5ac7417810a3b28e694bbfa"
 WIN_X64_ZIP_NAME="electron-v31.7.7-win32-x64.zip"
 WIN_X64_ZIP_SHA256="e91986dd243d55947e6c5d3fad21795562ec21fa0eec5e95f7e28c830571467f"
-WIN_ARM64_ZIP_NAME="electron-v31.7.7-win32-arm64.zip"
-WIN_ARM64_ZIP_SHA256="382de656e26620378f961f07b04fdc7e805de31399b7614826b86505abd7a4dd"
 
 print_step() {
   printf '\n==> %s\n' "$1"
@@ -80,10 +78,6 @@ download_electron_dist() {
     "https://github.com/electron/electron/releases/download/v31.7.7/${WIN_X64_ZIP_NAME}" \
     "${ELECTRON_WIN_DIR}/${WIN_X64_ZIP_NAME}" \
     "$WIN_X64_ZIP_SHA256"
-  download_with_resume \
-    "https://github.com/electron/electron/releases/download/v31.7.7/${WIN_ARM64_ZIP_NAME}" \
-    "${ELECTRON_WIN_DIR}/${WIN_ARM64_ZIP_NAME}" \
-    "$WIN_ARM64_ZIP_SHA256"
 }
 
 verify_frontend() {
@@ -120,19 +114,6 @@ package_win_portable_x64() {
   )
 }
 
-package_win_portable_arm64() {
-  print_step "build Windows portable (arm64)"
-  (
-    cd "$TMP_BUILD_DIR"
-    ./node_modules/.bin/electron-builder \
-      --win portable \
-      --arm64 \
-      -c.electronDist="$ELECTRON_WIN_DIR" \
-      -c.directories.output=release-win-portable/arm64 \
-      --publish=never
-  )
-}
-
 collect_artifacts() {
   print_step "collect artifacts into repo release directory"
   rm -rf "$RELEASE_OUT_DIR"
@@ -154,7 +135,6 @@ main() {
   verify_frontend
   package_mac_free_zip
   package_win_portable_x64
-  package_win_portable_arm64
   collect_artifacts
 
   print_step "done"

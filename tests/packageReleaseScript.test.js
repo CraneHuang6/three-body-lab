@@ -6,14 +6,14 @@ describe('release packaging script', () => {
     return fs.readFileSync(path.resolve(process.cwd(), 'scripts/package-release.sh'), 'utf8');
   }
 
-  it('builds Windows portable artifacts for both x64 and arm64 without NSIS', () => {
+  it('builds Windows portable artifacts for x64 only without NSIS', () => {
     const script = loadReleaseScript();
 
     expect(script).not.toContain('nsis');
     expect(script).toContain('electron-v31.7.7-win32-x64.zip');
-    expect(script).toContain('electron-v31.7.7-win32-arm64.zip');
     expect(script).toContain('release-win-portable/x64');
-    expect(script).toContain('release-win-portable/arm64');
+    expect(script).not.toContain('electron-v31.7.7-win32-arm64.zip');
+    expect(script).not.toContain('release-win-portable/arm64');
   });
 
   it('uses the free macOS zip packaging path instead of signed dmg packaging', () => {

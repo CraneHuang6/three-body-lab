@@ -11,6 +11,7 @@ import {
 import { SimulatorMode } from './modes/SimulatorMode.jsx';
 import { FullscreenToggleButton } from './components/FullscreenToggleButton.jsx';
 import { LoopingBgm } from './components/LoopingBgm.jsx';
+import { VolumeControl } from './components/VolumeControl.jsx';
 import './styles.css';
 
 function StoryMode({ onBack, onSwitchMode }) {
@@ -82,14 +83,15 @@ function HomeMode({ onEnter }) {
 
 export default function App() {
   const [mode, setMode] = React.useState('home');
+  const [bgmVolume, setBgmVolume] = React.useState(0.55);
 
   return (
     <div className="app-shell">
       <div className="app-noise" />
-      <LoopingBgm enabled={mode === 'story' || mode === 'simulator'} />
+      <LoopingBgm enabled={mode === 'story' || mode === 'simulator'} volume={bgmVolume} />
       {mode === 'home' ? <HomeMode onEnter={setMode} /> : null}
-      {mode === 'story' ? <StoryMode onBack={() => setMode('home')} onSwitchMode={setMode} /> : null}
-      {mode === 'simulator' ? <SimulatorMode onBack={() => setMode('home')} onSwitchMode={setMode} /> : null}
+      {mode === 'story' ? <StoryMode onBack={() => setMode('home')} onSwitchMode={setMode} volume={bgmVolume} onVolumeChange={setBgmVolume} /> : null}
+      {mode === 'simulator' ? <SimulatorMode onBack={() => setMode('home')} onSwitchMode={setMode} volume={bgmVolume} onVolumeChange={setBgmVolume} /> : null}
     </div>
   );
 }

@@ -12,11 +12,11 @@
 
 建议普通用户优先下载：
 
-- `三体实验室-0.1.0-arm64-mac.dmg`
+- `ThreeBodyLab-0.1.0-mac-arm64.dmg`
 
 如果 `dmg` 无法打开，也可以尝试：
 
-- `三体实验室-0.1.0-arm64-mac.zip`
+- `ThreeBodyLab-0.1.0-mac-arm64.zip`
 
 ## 运行要求
 

@@ -1,85 +1,93 @@
 # 三体实验室
 
-《三体》主题的电影化桌面实验项目。现在包含两种体验：
+一个以《三体》为灵感的桌面互动项目。
 
-- `观演模式`：延续原始的八大天象分镜演示
-- `实验室模式`：通过右侧控制舱分别调整 4 个天体的初始条件与视觉参数
+它不是专业天体模拟器，更像一个可观看、可上手调参的“科幻演示实验室”。
 
-## 当前结构
+## 这是什么
 
-- `src/App.jsx`：桌面版首页与模式切换入口
-- `src/modes/StoryScene.jsx`：观演模式场景
-- `src/modes/LabMode.jsx`：实验室模式与控制舱
-- `src/lib/animations.jsx`：时间轴与播放控件
-- `src/lib/simulation.jsx`：仿真核心与预设场景缓存
-- `src/lib/labState.js`：实验室状态、随机化与预设映射
-- `electron/`：Electron 主进程与 preload
-- `tests/`：Vitest 单测
+项目目前有两种体验：
 
-## 开发运行
+- `观演模式`：直接播放整理好的八大天象演示，适合展示和沉浸观看
+- `实验室模式`：手动调整 4 个天体的参数，观察轨迹、碰撞和画面变化
 
-安装依赖：
+如果你只是想快速理解这个项目，可以把它当成：
+
+- 一个《三体》风格的动态演示作品
+- 一个可以自己“拨动宇宙参数”的小实验
+
+## 适合谁
+
+- 喜欢《三体》题材和科幻视觉的人
+- 想做演示、展示或概念验证的人
+- 想继续开发这个项目的前端/Electron 开发者
+
+## 如何开始
+
+先安装依赖：
 
 ```bash
 npm install
 ```
 
-启动前端开发环境：
+启动网页开发模式：
 
 ```bash
 npm run dev:web
 ```
 
-构建前端产物：
+如果要同时启动桌面壳：
 
 ```bash
-npm run build
+npm run dev
 ```
 
-运行测试：
+打开后，首页可以选择：
+
+- `观演模式`
+- `实验室模式`
+
+## 常用命令
 
 ```bash
-npm test
+npm run dev:web   # 只启动网页界面
+npm run dev       # 启动网页界面 + Electron 桌面壳
+npm run build     # 构建前端产物
+npm test          # 运行测试
 ```
 
-## 桌面打包
+## 打包说明
 
-桌面壳基于 Electron，脚本已预留：
+如果你只是体验项目，通常不需要打包。
+
+需要生成桌面安装包时可用：
 
 ```bash
 npm run package:mac
 npm run package:win
 ```
 
-如果要一次性生成当前已验证过的 4 类产物，可以直接跑：
+如果要一次性生成当前脚本支持的发布产物，可运行：
 
 ```bash
 npm run package:release
 ```
 
-它会做这些事：
+当前机器上已知有两个限制：
 
-- 把当前仓库同步到 `/tmp/threebody-build`
-- 用 `ELECTRON_SKIP_BINARY_DOWNLOAD=1` 安装依赖
-- 断点续传下载已验证过 checksum 的 Electron 运行时压缩包
-- 运行 `npm test` 与 `npm run build`
-- 生成
-  - `macOS arm64 zip`
-  - `macOS arm64 dmg`
-  - `Windows arm64 portable`
-  - `Windows arm64 NSIS`
-- 把产物收集到仓库的 `release/` 目录
+- 外接磁盘环境下直接处理 `node_modules` 可能不稳定
+- `dmg` 和部分 Electron 打包步骤需要更高的系统权限
 
-### 当前机器的已知限制
+## 项目结构
 
-- 仓库所在外接卷上直接处理 `node_modules` 不稳定，所以脚本默认在 `/tmp` 副本里构建。
-- `dmg` 依赖 `hdiutil`，在当前 Codex 沙箱中会失败；真实运行时需要有系统级执行权限。
-- Windows 打包会写 `~/Library/Caches/electron-builder`，在当前 Codex 沙箱中也会失败；真实运行时需要有系统级执行权限。
+- `src/App.jsx`：首页和模式切换入口
+- `src/modes/StoryScene.jsx`：观演模式
+- `src/modes/LabMode.jsx`：实验室模式
+- `src/lib/simulation.jsx`：仿真逻辑
+- `src/lib/labState.js`：实验室参数状态
+- `electron/`：桌面壳
+- `tests/`：测试文件
 
-如果安装阶段遇到 Electron binary 下载中断，可先设置：
+## 一句话总结
 
-```bash
-ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
-```
-
-这允许先完成前端测试与构建；真正的桌面打包需要 Electron 二进制下载成功。
+这是一个把《三体》视觉演示和可调参数实验放在一起的桌面项目，既能看，也能自己动手试。

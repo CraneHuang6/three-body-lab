@@ -12,11 +12,13 @@
     "dev:electron": "wait-on tcp:5173 && electron .",
     "build": "vite build",
     "test": "vitest run",
-    "package": "npm run build && electron-builder",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:mac:zip": "npm run build && electron-builder --mac zip",
-    "package:mac:dmg": "npm run build && electron-builder --mac dmg",
-    "package:win": "npm run build && electron-builder --win",
+    "package": "npm run package:mac",
+    "package:mac": "npm run build && node scripts/package-mac-free.mjs",
+    "package:mac:zip": "npm run build && node scripts/package-mac-free.mjs",
+    "package:win": "npm run package:win:all",
+    "package:win:x64": "npm run build && node scripts/package-win.mjs x64",
+    "package:win:arm64": "npm run build && node scripts/package-win.mjs arm64",
+    "package:win:all": "npm run build && node scripts/package-win.mjs all",
     "package:release": "bash scripts/package-release.sh"
   },
   "build": {
@@ -34,14 +36,12 @@
     "mac": {
       "artifactName": "三体实验室-${version}-${arch}-mac.${ext}",
       "target": [
-        "dmg",
         "zip"
       ]
     },
     "win": {
       "artifactName": "三体实验室-${version}-${arch}.${ext}",
       "target": [
-        "nsis",
         "portable"
       ]
     }

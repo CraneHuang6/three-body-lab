@@ -10,8 +10,10 @@ RELEASE_OUT_DIR="${RELEASE_OUT_DIR:-$ROOT_DIR/release}"
 
 MAC_ZIP_NAME="electron-v31.7.7-darwin-arm64.zip"
 MAC_ZIP_SHA256="e81b75a185376effcc7dd15aef8877ab48474633e5ac7417810a3b28e694bbfa"
-WIN_ZIP_NAME="electron-v31.7.7-win32-arm64.zip"
-WIN_ZIP_SHA256="382de656e26620378f961f07b04fdc7e805de31399b7614826b86505abd7a4dd"
+WIN_X64_ZIP_NAME="electron-v31.7.7-win32-x64.zip"
+WIN_X64_ZIP_SHA256="e91986dd243d55947e6c5d3fad21795562ec21fa0eec5e95f7e28c830571467f"
+WIN_ARM64_ZIP_NAME="electron-v31.7.7-win32-arm64.zip"
+WIN_ARM64_ZIP_SHA256="382de656e26620378f961f07b04fdc7e805de31399b7614826b86505abd7a4dd"
 
 print_step() {
   printf '\n==> %s\n' "$1"
@@ -75,9 +77,13 @@ download_electron_dist() {
     "${ELECTRON_MAC_DIR}/${MAC_ZIP_NAME}" \
     "$MAC_ZIP_SHA256"
   download_with_resume \
-    "https://github.com/electron/electron/releases/download/v31.7.7/${WIN_ZIP_NAME}" \
-    "${ELECTRON_WIN_DIR}/${WIN_ZIP_NAME}" \
-    "$WIN_ZIP_SHA256"
+    "https://github.com/electron/electron/releases/download/v31.7.7/${WIN_X64_ZIP_NAME}" \
+    "${ELECTRON_WIN_DIR}/${WIN_X64_ZIP_NAME}" \
+    "$WIN_X64_ZIP_SHA256"
+  download_with_resume \
+    "https://github.com/electron/electron/releases/download/v31.7.7/${WIN_ARM64_ZIP_NAME}" \
+    "${ELECTRON_WIN_DIR}/${WIN_ARM64_ZIP_NAME}" \
+    "$WIN_ARM64_ZIP_SHA256"
 }
 
 verify_frontend() {
@@ -89,52 +95,40 @@ verify_frontend() {
   )
 }
 
-package_mac_zip() {
-  print_step "build macOS zip"
+package_mac_free_zip() {
+  print_step "build macOS zip for free distribution"
   (
     cd "$TMP_BUILD_DIR"
-    CSC_IDENTITY_AUTO_DISCOVERY=false \
-      ./node_modules/.bin/electron-builder \
-      --mac zip \
-      -c.electronDist="$ELECTRON_MAC_DIR" \
-      -c.directories.output=release-mac-zip \
-      --publish=never
+    THREEBODY_PROJECT_DIR="$TMP_BUILD_DIR" \
+    THREEBODY_RELEASE_DIR="$TMP_BUILD_DIR/release-mac-zip" \
+    THREEBODY_ELECTRON_DIST_DIR="$ELECTRON_MAC_DIR" \
+    THREEBODY_MAC_ARCH=arm64 \
+      node scripts/package-mac-free.mjs
   )
 }
 
-package_mac_dmg() {
-  print_step "build macOS dmg"
-  (
-    cd "$TMP_BUILD_DIR"
-    CSC_IDENTITY_AUTO_DISCOVERY=false \
-      ./node_modules/.bin/electron-builder \
-      --mac dmg \
-      -c.electronDist="$ELECTRON_MAC_DIR" \
-      -c.directories.output=release-mac-dmg \
-      --publish=never
-  )
-}
-
-package_win_portable() {
-  print_step "build Windows portable"
+package_win_portable_x64() {
+  print_step "build Windows portable (x64)"
   (
     cd "$TMP_BUILD_DIR"
     ./node_modules/.bin/electron-builder \
       --win portable \
+      --x64 \
       -c.electronDist="$ELECTRON_WIN_DIR" \
-      -c.directories.output=release-win-portable \
+      -c.directories.output=release-win-portable/x64 \
       --publish=never
   )
 }
 
-package_win_nsis() {
-  print_step "build Windows NSIS"
+package_win_portable_arm64() {
+  print_step "build Windows portable (arm64)"
   (
     cd "$TMP_BUILD_DIR"
     ./node_modules/.bin/electron-builder \
-      --win nsis \
+      --win portable \
+      --arm64 \
       -c.electronDist="$ELECTRON_WIN_DIR" \
-      -c.directories.output=release-win-nsis \
+      -c.directories.output=release-win-portable/arm64 \
       --publish=never
   )
 }
@@ -145,9 +139,7 @@ collect_artifacts() {
   mkdir -p "$RELEASE_OUT_DIR"
 
   cp -R "$TMP_BUILD_DIR/release-mac-zip" "$RELEASE_OUT_DIR/mac-zip"
-  cp -R "$TMP_BUILD_DIR/release-mac-dmg" "$RELEASE_OUT_DIR/mac-dmg"
   cp -R "$TMP_BUILD_DIR/release-win-portable" "$RELEASE_OUT_DIR/win-portable"
-  cp -R "$TMP_BUILD_DIR/release-win-nsis" "$RELEASE_OUT_DIR/win-nsis"
 }
 
 main() {
@@ -160,14 +152,13 @@ main() {
   install_dependencies
   download_electron_dist
   verify_frontend
-  package_mac_zip
-  package_mac_dmg
-  package_win_portable
-  package_win_nsis
+  package_mac_free_zip
+  package_win_portable_x64
+  package_win_portable_arm64
   collect_artifacts
 
   print_step "done"
-  find "$RELEASE_OUT_DIR" -maxdepth 2 -type f | sort
+  find "$RELEASE_OUT_DIR" -maxdepth 3 -type f | sort
 }
 
 main "$@"

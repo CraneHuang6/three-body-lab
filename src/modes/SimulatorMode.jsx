@@ -14,6 +14,7 @@ import {
   STORY_PRESET_OPTIONS,
 } from '../lib/simulatorState.js';
 import { FullscreenToggleButton } from '../components/FullscreenToggleButton.jsx';
+import { VolumeControl } from '../components/VolumeControl.jsx';
 
 const WIDTH = 1280;
 const HEIGHT = 800;
@@ -410,7 +411,7 @@ function PresetQuickSwitch({ selectedPreset, onSelect }) {
   );
 }
 
-export function SimulatorMode({ onBack, onSwitchMode }) {
+export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) {
   const canvasFullscreenRef = React.useRef(null);
   const [simulatorState, setSimulatorState] = React.useState(() => createDefaultSimulatorState());
   const [playing, setPlaying] = React.useState(true);
@@ -524,6 +525,7 @@ export function SimulatorMode({ onBack, onSwitchMode }) {
           <h2>四个天体，实时操控</h2>
         </div>
         <div className="toolbar-actions">
+          <VolumeControl value={volume} onChange={onVolumeChange} />
           <button className="ghost-button" onClick={onBack}>返回首页</button>
           <button className="ghost-button" onClick={() => onSwitchMode('story')}>切到观演模式</button>
           <FullscreenToggleButton />

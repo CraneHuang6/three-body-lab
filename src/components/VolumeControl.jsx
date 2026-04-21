@@ -3,6 +3,12 @@ import React from 'react';
 export function VolumeControl({ value, onChange }) {
   const lastVolumeRef = React.useRef(value);
 
+  React.useEffect(() => {
+    if (value > 0) {
+      lastVolumeRef.current = value;
+    }
+  }, [value]);
+
   const handleToggle = () => {
     if (value > 0) {
       lastVolumeRef.current = value;
@@ -19,6 +25,7 @@ export function VolumeControl({ value, onChange }) {
         className="volume-control__icon"
         onClick={handleToggle}
         aria-label={value === 0 ? '取消静音' : '静音'}
+        aria-pressed={value === 0}
       >
         {value === 0 ? (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

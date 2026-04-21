@@ -31,7 +31,6 @@ const FG_DIM = 'rgba(242,240,234,0.55)';
 const FG_FAINT = 'rgba(242,240,234,0.25)';
 const BG = '#0a0a0a';
 const PLANET_HIGHLIGHT = '#35e6ff';
-const HELVETICA = '"Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", Arial, sans-serif';
 
 const BODY_NAMES = ['α', 'β', 'γ', '三体星'];
 const PLANET_IDX = 3;
@@ -204,7 +203,7 @@ function Body({ scenarioId, simTime, bodyIdx, dimmedIfDistantFromIdx = null }) {
       {isPlanet ? (
         <text
           x={px + r + 8} y={py - 2}
-          fill={FG_DIM} fontSize={11} fontFamily={HELVETICA}
+          fill={FG_DIM} fontSize={11} fontFamily="var(--font-hud)"
           style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '0.12em' }}
         >
           {label}
@@ -319,7 +318,7 @@ function TempReadout({ scenarioId, simTime }) {
       padding: '16px 18px',
       background: 'rgba(14,14,14,0.7)',
       border: '1px solid rgba(242,240,234,0.18)',
-      fontFamily: HELVETICA,
+      fontFamily: 'var(--font-hud)',
       color: FG,
       pointerEvents: 'none',
     }}>
@@ -400,7 +399,7 @@ function MetricHUD({ scenarioId, simTime, metric }) {
     padding: '14px 16px',
     background: 'rgba(14,14,14,0.55)',
     border: '1px solid rgba(242,240,234,0.16)',
-    fontFamily: HELVETICA,
+    fontFamily: 'var(--font-hud)',
     color: FG,
     pointerEvents: 'none',
   };
@@ -752,7 +751,7 @@ function FactCard({ kicker, title, body, x, y, width = 360 }) {
     <div style={{
       position: 'absolute', left: x, top: y, width,
       opacity: op, transform: `translateY(${ty}px)`,
-      fontFamily: HELVETICA, color: FG, pointerEvents: 'none',
+      fontFamily: 'var(--font-hud)', color: FG, pointerEvents: 'none',
     }}>
       <div style={{
         fontSize: 10, letterSpacing: '0.22em', color: FG_DIM,
@@ -783,7 +782,7 @@ function ScenarioHUD({ idx, name, kicker, tagline, simTime }) {
     <>
       <div style={{
         position: 'absolute', left: 40, top: 32,
-        fontFamily: HELVETICA, color: FG,
+        fontFamily: 'var(--font-hud)', color: FG,
         fontSize: 11, letterSpacing: '0.22em',
       }}>
         <div style={{ color: FG_DIM, marginBottom: 6 }}>{SCENARIO_SERIES_TITLE}</div>
@@ -797,7 +796,7 @@ function ScenarioHUD({ idx, name, kicker, tagline, simTime }) {
       </div>
       <div style={{
         position: 'absolute', right: 40, top: 32,
-        fontFamily: HELVETICA, color: FG_DIM,
+        fontFamily: 'var(--font-hud)', color: FG_DIM,
         fontSize: 11, letterSpacing: '0.22em', textAlign: 'right',
       }}>
         <div style={{ marginBottom: 6 }}>仿真时间</div>
@@ -809,7 +808,7 @@ function ScenarioHUD({ idx, name, kicker, tagline, simTime }) {
       <div style={{
         position: 'absolute', left: 40, bottom: 36,
         display: 'flex', gap: 10,
-        fontFamily: HELVETICA, color: FG_DIM,
+        fontFamily: 'var(--font-hud)', color: FG_DIM,
         fontSize: 11, letterSpacing: '0.18em',
       }}>
         {Array.from({ length: TOTAL_SCENARIOS }).map((_, i) => (
@@ -905,7 +904,7 @@ function IntroScene() {
       position: 'absolute', inset: 0, opacity: fadeOut,
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      fontFamily: HELVETICA, color: FG,
+      fontFamily: 'var(--font-hud)', color: FG,
     }}>
       <Sprite start={0} end={INTRO_DUR}>
         {({ localTime }) => {
@@ -981,7 +980,7 @@ function OutroScene({ startT }) {
               position: 'absolute', inset: 0,
               display: 'flex', flexDirection: 'column',
               alignItems: 'center', justifyContent: 'center',
-              fontFamily: HELVETICA, color: FG,
+              fontFamily: 'var(--font-hud)', color: FG,
               textAlign: 'center', padding: '0 80px',
               opacity: fadeOut,
             }}>

@@ -14,7 +14,7 @@ import { LoopingBgm } from './components/LoopingBgm.jsx';
 import { VolumeControl } from './components/VolumeControl.jsx';
 import './styles.css';
 
-function StoryMode({ onBack, onSwitchMode }) {
+function StoryMode({ onBack, onSwitchMode, volume, onVolumeChange }) {
   const stageFrameRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -29,6 +29,7 @@ function StoryMode({ onBack, onSwitchMode }) {
           <h2>三体世界 · 八大天象</h2>
         </div>
         <div className="toolbar-actions">
+          <VolumeControl value={volume} onChange={onVolumeChange} />
           <button className="ghost-button" onClick={onBack}>返回首页</button>
           <button className="ghost-button" onClick={() => onSwitchMode('simulator')}>切到模拟器</button>
           <FullscreenToggleButton />

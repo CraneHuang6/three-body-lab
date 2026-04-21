@@ -417,6 +417,8 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
   const [playing, setPlaying] = React.useState(true);
   const [selectedPreset, setSelectedPreset] = React.useState('default');
   const [surfaceSize, setSurfaceSize] = React.useState({ width: WIDTH, height: HEIGHT });
+  const [autoResetCounter, setAutoResetCounter] = React.useState(0);
+  const hasAutoResetRef = React.useRef(false);
 
   const physicsKey = React.useMemo(
     () => JSON.stringify(simulatorState.bodies.map((body) => body.physics)),
@@ -430,7 +432,7 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
     duration: simulatorState.simConfig.duration,
     simSpeed: simulatorState.simConfig.simSpeed,
     noStarCollisions: simulatorState.simConfig.noStarCollisions,
-  }), [physicsKey, simulatorState.simConfig.duration, simulatorState.simConfig.noStarCollisions, simulatorState.simConfig.simSpeed]);
+  }), [physicsKey, simulatorState.simConfig.duration, simulatorState.simConfig.noStarCollisions, simulatorState.simConfig.simSpeed, autoResetCounter]);
 
   const [simTime, setSimTime] = useAnimationTime({
     duration: simulatorState.simConfig.duration,
@@ -439,6 +441,19 @@ export function SimulatorMode({ onBack, onSwitchMode, volume, onVolumeChange }) 
   });
 
   const snapshot = sampleSimulationCache(cache, simTime);
+  const allDestroyed = snapshot.every((b) => !b.alive);
+
+  React.useEffect(() => {
+    if (allDestroyed && playing && !hasAutoResetRef.current) {
+      hasAutoResetRef.current = true;
+      setPlaying(false);
+      setAutoResetCounter((c) => c + 1);
+      setSimTime(0);
+    } else if (!allDestroyed) {
+      hasAutoResetRef.current = false;
+    }
+  }, [allDestroyed, playing, setSimTime]);
+
   const colors = simulatorState.bodies.map((body) => body.visual.color);
   const planetTemp = React.useMemo(() => equilibriumTempK(snapshot), [snapshot]);
 

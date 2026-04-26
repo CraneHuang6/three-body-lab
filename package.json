@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Three Body desktop simulator with cinematic story mode and interactive four-body controls.",
+  "license": "Apache-2.0",
   "author": "Codex + crane",
   "type": "module",
   "main": "electron/main.js",
